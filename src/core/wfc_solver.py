@@ -1,3 +1,4 @@
+
 """
 core/wfc_solver.py
 ==================
@@ -54,8 +55,15 @@ class WFCSolver(object):
         self.counts          = [0] * len(tiles)
         self.collapsed_count = 0
 
-        all_ids   = set(range(len(tiles)))
-        self.wave = {k: copy.copy(all_ids) for k in filled_keys}
+        # ── Phase 1 fix: exclude max_count=0 tiles from initial wave ──────────
+        # A tile with max_count=0 can never be placed. Removing it from the
+        # initial superposition prevents it from being collapsed before
+        # _remove_exhausted has a chance to run.
+        valid_ids = frozenset(
+            tid for tid, tile in enumerate(tiles)
+            if tile.max_count != 0
+        )
+        self.wave = {k: set(valid_ids) for k in filled_keys}
 
         self._tile_queues = [
             deque(tile_ranking_lists[t])
