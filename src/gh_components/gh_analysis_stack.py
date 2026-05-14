@@ -1,0 +1,1 @@
+CORE_PATH = r"C:\Users\mprado1\Desktop\Git\Spatial-Morphology\src"
