@@ -1,12 +1,10 @@
+# -*- coding: utf-8 -*-
 """
 core/voxel_grid.py
 ==================
 VoxelGrid class — core data structure for the voxel plugin.
-
-Previously defined inside the GH VoxelGrid component.
-All components that consume a VoxelGrid import from here.
+...
 """
-
 import Rhino.Geometry as rg
 import math
 
