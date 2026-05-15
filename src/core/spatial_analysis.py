@@ -1,10 +1,8 @@
+# -*- coding: utf-8 -*-
 """
 core/spatial_analysis.py
 ========================
-Shared SpatialAnalysis container used by all SA components.
-
-Previously copy-pasted into every SA component — now defined once here.
-All SA GH components import this class from this module.
+...
 """
 
 

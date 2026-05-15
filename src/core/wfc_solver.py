@@ -1,10 +1,9 @@
 
+# -*- coding: utf-8 -*-
 """
 core/wfc_solver.py
-==================
-WFCSolver class — deterministic performance-guided Wave Function Collapse.
-
-Previously defined inside the GH WFC component.
+========================
+...
 """
 
 import copy
