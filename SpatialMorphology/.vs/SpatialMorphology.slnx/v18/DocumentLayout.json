@@ -1,0 +1,71 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{225EAAF1-DEB9-6EA3-033E-3648D090C54F}|SpatialMorphology.csproj|c:\\users\\mprado1\\desktop\\git\\spatial-morphology\\spatialmorphology\\components\\setup\\valuesetcomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{225EAAF1-DEB9-6EA3-033E-3648D090C54F}|SpatialMorphology.csproj|solutionrelative:components\\setup\\valuesetcomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{225EAAF1-DEB9-6EA3-033E-3648D090C54F}|SpatialMorphology.csproj|c:\\users\\mprado1\\desktop\\git\\spatial-morphology\\spatialmorphology\\spatialmorphology.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
+      "RelativeMoniker": "D:0:0:{225EAAF1-DEB9-6EA3-033E-3648D090C54F}|SpatialMorphology.csproj|solutionrelative:spatialmorphology.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{225EAAF1-DEB9-6EA3-033E-3648D090C54F}|SpatialMorphology.csproj|c:\\users\\mprado1\\desktop\\git\\spatial-morphology\\spatialmorphology\\ui\\valuesetmatrixform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{225EAAF1-DEB9-6EA3-033E-3648D090C54F}|SpatialMorphology.csproj|solutionrelative:ui\\valuesetmatrixform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "ValueSetComponent.cs",
+              "DocumentMoniker": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\Components\\Setup\\ValueSetComponent.cs",
+              "RelativeDocumentMoniker": "Components\\Setup\\ValueSetComponent.cs",
+              "ToolTip": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\Components\\Setup\\ValueSetComponent.cs",
+              "RelativeToolTip": "Components\\Setup\\ValueSetComponent.cs",
+              "ViewState": "AgIAACIAAAAAAAAAAAAswCIBAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-16T02:51:40.002Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "SpatialMorphology",
+              "DocumentMoniker": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\SpatialMorphology.csproj",
+              "RelativeDocumentMoniker": "SpatialMorphology.csproj",
+              "ToolTip": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\SpatialMorphology.csproj",
+              "RelativeToolTip": "SpatialMorphology.csproj",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAACQAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2026-05-16T02:39:58.436Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "ValueSetMatrixForm.cs",
+              "DocumentMoniker": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\UI\\ValueSetMatrixForm.cs",
+              "RelativeDocumentMoniker": "UI\\ValueSetMatrixForm.cs",
+              "ToolTip": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\UI\\ValueSetMatrixForm.cs",
+              "RelativeToolTip": "UI\\ValueSetMatrixForm.cs",
+              "ViewState": "AgIAANYAAAAAAAAAAAAAAIwAAAAfAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-16T02:34:35.181Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

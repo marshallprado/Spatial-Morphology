@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "e4wCYyt9+rI=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\mprado1\\Desktop\\Git\\Spatial-Morphology\\SpatialMorphology\\SpatialMorphology.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\mprado1\\.nuget\\packages\\grasshopper\\8.31.26126.13431\\grasshopper.8.31.26126.13431.nupkg.sha512",
+    "C:\\Users\\mprado1\\.nuget\\packages\\rhinocommon\\8.31.26126.13431\\rhinocommon.8.31.26126.13431.nupkg.sha512"
+  ],
+  "logs": []
+}

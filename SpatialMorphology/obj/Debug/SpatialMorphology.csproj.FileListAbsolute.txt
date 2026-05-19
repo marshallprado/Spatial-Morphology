@@ -1,0 +1,13 @@
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.csproj.AssemblyReference.cache
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.AssemblyInfoInputs.cache
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.AssemblyInfo.cs
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.csproj.CoreCompileInputs.cache
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.sourcelink.json
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\bin\Debug\SpatialMorphology.deps.json
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\bin\Debug\SpatialMorphology.dll
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\bin\Debug\SpatialMorphology.pdb
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.dll
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\refint\SpatialMorphology.dll
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\SpatialMorphology.pdb
+C:\Users\mprado1\Desktop\Git\Spatial-Morphology\SpatialMorphology\obj\Debug\ref\SpatialMorphology.dll
