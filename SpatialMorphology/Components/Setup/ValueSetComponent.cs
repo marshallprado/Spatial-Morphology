@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 using Grasshopper.Kernel;
+using System.Drawing;
 
 namespace SpatialMorphology
 {
@@ -28,14 +29,25 @@ namespace SpatialMorphology
         public override Guid ComponentGuid =>
             new Guid("B1C2D3E4-F5A6-7890-BCDE-F12345678901");
 
+        protected override Bitmap Icon
+        {
+            get
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                var stream = assembly.GetManifestResourceStream(
+                    "SpatialMorphology.Resources.ValueSet_24.png");
+                return stream != null ? new Bitmap(stream) : null;
+            }
+        }
+
         // ── Parameters ────────────────────────────────────────────────────────
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddGenericParameter("programs", "P",
-                "List of ProgramDefinition objects from ProgramDefinition components.",
-                GH_ParamAccess.list);
             pManager.AddGenericParameter("analysis", "A",
                 "List of SpatialAnalysis objects from SA components.",
+                GH_ParamAccess.list);
+            pManager.AddGenericParameter("programs", "P",
+                "List of ProgramDefinition objects from ProgramDefinition components.",
                 GH_ParamAccess.list);
         }
 
@@ -53,22 +65,54 @@ namespace SpatialMorphology
 
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-
             // ── Collect inputs ────────────────────────────────────────────────
             var programObjects = new List<object>();
             var analysisObjects = new List<object>();
 
-            if (!DA.GetDataList(0, programObjects)) return;
-            if (!DA.GetDataList(1, analysisObjects)) return;
 
-            // ── Debug — inspect incoming objects ─────────────────────────────────────────
-            var debugInfo = new System.Text.StringBuilder();
-            foreach (var obj in analysisObjects)
+            if (!DA.GetDataList(0, analysisObjects)) return;
+            if (!DA.GetDataList(1, programObjects)) return;
+
+
+
+            // ── Extract program names using dynamic ───────────────────────────
+            // Extract program names
+            var programNames = new List<string>();
+            foreach (var obj in programObjects)
             {
                 var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper w
                     ? w.Value : obj;
                 if (inner == null) continue;
 
+                if (inner is ProgramDefinition pd)
+                {
+                    programNames.Add(pd.Name);
+                    continue;
+                }
+                try
+                {
+                    dynamic dynObj = inner;
+                    string n = dynObj.name?.ToString();
+                    if (!string.IsNullOrWhiteSpace(n))
+                        programNames.Add(n);
+                }
+                catch { }
+            }
+
+            // Extract channel labels
+            var channelLabels = new List<string>();
+            foreach (var obj in analysisObjects)
+            {
+                var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper w2
+                    ? w2.Value : obj;
+                if (inner == null) continue;
+
+                if (inner is SpatialAnalysis sa)
+                {
+                    if (!channelLabels.Contains(sa.Label))
+                        channelLabels.Add(sa.Label);
+                    continue;
+                }
                 try
                 {
                     dynamic dynObj = inner;
@@ -77,40 +121,6 @@ namespace SpatialMorphology
                         channelLabels.Add(l);
                 }
                 catch { }
-            }
-            DA.SetData(1, debugInfo.ToString());
-            return;
-
-            // ── Extract program names ─────────────────────────────────────────
-            var programNames = new List<string>();
-            foreach (var obj in programObjects)
-            {
-                var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper w
-                    ? w.Value : obj;
-                var nameProp = inner?.GetType().GetProperty("name")
-                            ?? inner?.GetType().GetProperty("Name");
-                if (nameProp != null)
-                {
-                    var n = nameProp.GetValue(inner)?.ToString();
-                    if (!string.IsNullOrWhiteSpace(n))
-                        programNames.Add(n);
-                }
-            }
-
-            // ── Extract channel labels ────────────────────────────────────────
-            var channelLabels = new List<string>();
-            foreach (var obj in analysisObjects)
-            {
-                var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper w
-                    ? w.Value : obj;
-                var labelProp = inner?.GetType().GetProperty("label")
-                             ?? inner?.GetType().GetProperty("Label");
-                if (labelProp != null)
-                {
-                    var l = labelProp.GetValue(inner)?.ToString();
-                    if (!string.IsNullOrWhiteSpace(l) && !channelLabels.Contains(l))
-                        channelLabels.Add(l);
-                }
             }
 
             if (programNames.Count == 0)
@@ -127,7 +137,6 @@ namespace SpatialMorphology
             }
 
             // ── Sync weights dict with current programs/channels ──────────────
-            // Add missing programs/channels with default weight 1.0
             foreach (var prog in programNames)
             {
                 if (!_weights.ContainsKey(prog))
