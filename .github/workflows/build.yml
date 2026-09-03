@@ -1,0 +1,111 @@
+name: build
+
+# Cross-platform build validation.
+#
+# There is no Rhino on GitHub runners, so this does NOT test plugin behaviour.
+# What it DOES catch is the failure class that is invisible on Windows:
+#   * case-sensitive path/namespace mismatches (macOS + Linux filesystems)
+#   * accidental reintroduction of Windows-only APIs (WinForms/WPF)
+#   * NuGet restore problems on a clean machine (no local Rhino install)
+#
+# ubuntu-latest is included deliberately: it is also case-sensitive and it is
+# the fastest runner, so it usually reports a casing bug before macOS does.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:   # lets you run it manually from the Actions tab
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Do not cancel the other legs when one fails — you want to see whether
+      # a failure is macOS-only or universal.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Build the PROJECT, not the solution. The .slnx carries stale x64/arm64
+      # platform mappings that do not exist on macOS or Linux.
+      - name: Restore
+        run: dotnet restore SpatialMorphology/SpatialMorphology.csproj
+
+      - name: Build
+        run: >
+          dotnet build SpatialMorphology/SpatialMorphology.csproj
+          -c Release
+          --no-restore
+          -p:Platform=AnyCPU
+
+      # The deploy targets in the .csproj are ContinueOnError, so a missing
+      # Rhino install on the runner does not fail the build.
+
+      - name: Upload .gha
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpatialMorphology-gha
+          path: SpatialMorphology/bin/Release/SpatialMorphology.gha
+          if-no-files-found: error
+
+  # Static guards for the constraints that a successful Windows build hides.
+  guardrails:
+    name: cross-platform guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No WPF / WinForms
+        run: |
+          if grep -rniE "<Use(WPF|WindowsForms)>\s*true" --include=*.csproj .; then
+            echo "::error::UseWPF/UseWindowsForms break macOS. Use Eto.Forms."
+            exit 1
+          fi
+
+      - name: No System.Windows.Forms references
+        run: |
+          if grep -rn "using System.Windows.Forms" --include=*.cs .; then
+            echo "::error::System.Windows.Forms is Windows-only. Use Eto.Forms."
+            exit 1
+          fi
+
+      - name: No -windows target framework
+        run: |
+          if grep -rnE "<TargetFrameworks?>[^<]*-windows" --include=*.csproj .; then
+            echo "::error::A -windows TFM will not load on macOS."
+            exit 1
+          fi
+
+      - name: No x64 / arm64 platform configs
+        run: |
+          if grep -rnE "<PlatformTarget>\s*(x64|arm64)" --include=*.csproj .; then
+            echo "::error::Rhino 8 needs AnyCPU to run on Windows, Intel Mac and Apple Silicon."
+            exit 1
+          fi
+
+      - name: No absolute Windows paths
+        run: |
+          if grep -rniE "<HintPath>\s*[A-Z]:\\\\" --include=*.csproj .; then
+            echo "::error::Absolute HintPath will not resolve on another machine or on macOS."
+            exit 1
+          fi
+
+      - name: No BinaryFormatter
+        run: |
+          if grep -rn "BinaryFormatter" --include=*.cs .; then
+            echo "::error::BinaryFormatter is disabled by default on .NET 9+."
+            exit 1
+          fi
