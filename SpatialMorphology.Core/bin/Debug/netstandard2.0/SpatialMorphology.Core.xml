@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>SpatialMorphology.Core</name>
+    </assembly>
+    <members>
+        <member name="T:SpatialMorphology.ValueSet">
+            <summary>
+            Stores signed multipliers linking a program to analysis channels.
+            One ValueSet per program — consumed by AnalysisStack for voxel scoring.
+            
+            Multiplier rules:
+              +1.0  = prefer HIGH values in this channel
+              -1.0  = prefer LOW values in this channel
+               0.0  = ignore this channel for this program
+               2.0  = prefer HIGH, twice as important as 1.0
+            </summary>
+        </member>
+        <member name="P:SpatialMorphology.ValueSet.ProgramName">
+            <summary>Name of the program this ValueSet belongs to.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ValueSet.Weights">
+            <summary>
+            Dictionary of channel label -> signed multiplier.
+            Keys match SA component label outputs exactly.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.#ctor(System.String,System.Collections.Generic.Dictionary{System.String,System.Double})">
+            <summary>
+            Create a ValueSet for a named program with a set of channel weights.
+            </summary>
+            <param name="programName">Must match a ProgramDefinition name exactly.</param>
+            <param name="weights">Channel label to signed multiplier mapping.</param>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.#ctor(System.String,System.Collections.Generic.IList{System.String},System.Collections.Generic.IList{System.Double})">
+            <summary>
+            Create a ValueSet from parallel lists of labels and multipliers.
+            </summary>
+            <param name="programName">Must match a ProgramDefinition name exactly.</param>
+            <param name="labels">Channel labels — must match SA component labels.</param>
+            <param name="multipliers">Signed multipliers — parallel to labels.</param>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.GetWeight(System.String)">
+            <summary>
+            Get the multiplier for a channel label.
+            Returns 0.0 if the label is not present (channel ignored).
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.HasChannel(System.String)">
+            <summary>
+            Returns true if this ValueSet has a non-zero weight for the label.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.SetWeight(System.String,System.Double)">
+            <summary>
+            Update or add a weight for a channel label.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.Summary">
+            <summary>
+            Human-readable summary of all channel weights.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.ToString">
+            <summary>
+            Returns a compact string representation.
+            </summary>
+        </member>
+    </members>
+</doc>

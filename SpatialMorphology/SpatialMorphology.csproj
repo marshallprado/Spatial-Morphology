@@ -41,6 +41,7 @@
 		<PackageReference Include="Grasshopper" Version="8.31.26126.13431" ExcludeAssets="runtime" PrivateAssets="all" />
 		<PackageReference Include="RhinoCommon" Version="8.31.26126.13431" ExcludeAssets="runtime" PrivateAssets="all" />
 		<PackageReference Include="Eto.Forms" Version="2.*" ExcludeAssets="runtime" PrivateAssets="all" />
+		<ProjectReference Include="..\SpatialMorphology.Core\SpatialMorphology.Core.csproj" />
 	</ItemGroup>
 
 	<!-- ============ Embedded icons ================================ -->
@@ -86,22 +87,23 @@
 		<Folder Include="Components\Display\" />
 	</ItemGroup>
 
-	<!-- ============ Local deploy for F5 debugging ==================
-	     Replaces the old duplicated PostBuild targets and deploy.ps1.
-	     Two targets with the same Name silently override each other, so
-	     these are distinctly named and OS-conditioned.
-	     ContinueOnError: never fail a build (or CI) just because Rhino
-	     is not installed on the machine. -->
+	<!-- Files that must travel together into the Libraries folder.
+	     The .gha alone is not enough once it references Core. -->
+	<ItemGroup>
+		<GhaDeployFiles Include="$(TargetPath)" />
+		<GhaDeployFiles Include="$(TargetDir)SpatialMorphology.Core.dll" />
+	</ItemGroup>
+
 	<Target Name="DeployToGrasshopperWindows" AfterTargets="Build"
 	        Condition="'$(OS)' == 'Windows_NT'">
-		<Copy SourceFiles="$(TargetPath)"
+		<Copy SourceFiles="@(GhaDeployFiles)"
 		      DestinationFolder="$(AppData)\Grasshopper\Libraries"
 		      ContinueOnError="true" />
 	</Target>
 
 	<Target Name="DeployToGrasshopperMac" AfterTargets="Build"
 	        Condition="'$(OS)' != 'Windows_NT'">
-		<Copy SourceFiles="$(TargetPath)"
+		<Copy SourceFiles="@(GhaDeployFiles)"
 		      DestinationFolder="$(HOME)/Library/Application Support/McNeel/Rhinoceros/8.0/Plug-ins/Grasshopper (b45a29b1-4343-4035-989e-044e8580d9cf)/Libraries"
 		      ContinueOnError="true" />
 	</Target>
