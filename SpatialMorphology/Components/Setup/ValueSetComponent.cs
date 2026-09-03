@@ -2,12 +2,17 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Windows.Forms;
-using Grasshopper.Kernel;
 using System.Drawing;
+using Grasshopper.Kernel;
+using Grasshopper.GUI;
+using Grasshopper.GUI.Canvas;
 
 namespace SpatialMorphology
 {
+    /// <summary>
+    /// Defines per-channel multipliers for each program. Double-click the component
+    /// on the canvas to open the matrix editor.
+    /// </summary>
     public class ValueSetComponent : GH_Component
     {
         // ── Stored weights ────────────────────────────────────────────────────
@@ -20,12 +25,12 @@ namespace SpatialMorphology
             : base(
                 "ValueSet",
                 "ValSet",
-                "Define per-channel multipliers for each program. Click 'Edit Weights' to open the matrix editor.",
+                "Define per-channel multipliers for each program. Double-click the component to open the matrix editor.",
                 "Spatial Morphology",
                 "Setup")
         { }
 
-        // ── GUID ──────────────────────────────────────────────────────────────
+        // ── GUID — DO NOT CHANGE ──────────────────────────────────────────────
         public override Guid ComponentGuid =>
             new Guid("B1C2D3E4-F5A6-7890-BCDE-F12345678901");
 
@@ -36,11 +41,31 @@ namespace SpatialMorphology
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
                 var stream = assembly.GetManifestResourceStream(
                     "SpatialMorphology.Resources.ValueSet_24.png");
-                return stream != null ? new Bitmap(stream) : null;
+                return stream != null ? new Bitmap(stream) : null!;
             }
         }
 
-        // ── Parameters ────────────────────────────────────────────────────────
+        // ── Custom attributes: double-click opens the editor ──────────────────
+        // Replaces the old AppendAdditionalMenuItems override, which required
+        // System.Windows.Forms.ToolStripDropDown and is therefore Windows-only.
+        public override void CreateAttributes()
+        {
+            m_attributes = new ValueSetAttributes(this);
+        }
+
+        private sealed class ValueSetAttributes : Grasshopper.Kernel.Attributes.GH_ComponentAttributes
+        {
+            public ValueSetAttributes(ValueSetComponent owner) : base(owner) { }
+
+            public override GH_ObjectResponse RespondToMouseDoubleClick(
+                GH_Canvas sender, GH_CanvasMouseEvent e)
+            {
+                ((ValueSetComponent)Owner).OpenWeightsEditor();
+                return GH_ObjectResponse.Handled;
+            }
+        }
+
+        // ── Parameters — order and nicknames unchanged ─────────────────────────
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddGenericParameter("analysis", "A",
@@ -62,21 +87,15 @@ namespace SpatialMorphology
         }
 
         // ── Solve ─────────────────────────────────────────────────────────────
-
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            // ── Collect inputs ────────────────────────────────────────────────
             var programObjects = new List<object>();
             var analysisObjects = new List<object>();
-
 
             if (!DA.GetDataList(0, analysisObjects)) return;
             if (!DA.GetDataList(1, programObjects)) return;
 
-
-
-            // ── Extract program names using dynamic ───────────────────────────
-            // Extract program names
+            // ── Extract program names ─────────────────────────────────────────
             var programNames = new List<string>();
             foreach (var obj in programObjects)
             {
@@ -99,7 +118,7 @@ namespace SpatialMorphology
                 catch { }
             }
 
-            // Extract channel labels
+            // ── Extract channel labels ────────────────────────────────────────
             var channelLabels = new List<string>();
             foreach (var obj in analysisObjects)
             {
@@ -164,16 +183,13 @@ namespace SpatialMorphology
                 programNames.Count, channelLabels.Count));
             lines.AppendLine("");
 
-            // Header row
             lines.Append("Program".PadRight(20));
             foreach (var ch in channelLabels)
                 lines.Append(ch.PadRight(14));
             lines.AppendLine("");
 
-            // Divider
             lines.AppendLine(new string('-', 20 + channelLabels.Count * 14));
 
-            // Data rows
             foreach (var prog in programNames)
             {
                 lines.Append(prog.PadRight(20));
@@ -190,16 +206,9 @@ namespace SpatialMorphology
             DA.SetData(1, lines.ToString().TrimEnd());
         }
 
-        // ── Custom UI button ──────────────────────────────────────────────────
-        public override void AppendAdditionalMenuItems(ToolStripDropDown menu)
+        // ── Editor launch (called from double-click) ───────────────────────────
+        internal void OpenWeightsEditor()
         {
-            base.AppendAdditionalMenuItems(menu);
-            Menu_AppendItem(menu, "Edit Weights...", OnEditWeights, true);
-        }
-
-        private void OnEditWeights(object sender, EventArgs e)
-        {
-            // Collect current program names and channel labels from weights dict
             var programNames = _weights.Keys.ToList();
             var channelLabels = programNames.Count > 0
                 ? _weights[programNames[0]].Keys.ToList()
@@ -207,15 +216,13 @@ namespace SpatialMorphology
 
             if (programNames.Count == 0 || channelLabels.Count == 0)
             {
-                MessageBox.Show(
+                // Rhino.UI.Dialogs is cross-platform; MessageBox.Show was not.
+                Rhino.UI.Dialogs.ShowMessage(
                     "Connect programs and analysis inputs first, then run the component before editing weights.",
-                    "ValueSet",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                    "ValueSet");
                 return;
             }
 
-            // Build current weights array for the form
             int nP = programNames.Count;
             int nC = channelLabels.Count;
             var existing = new double[nP, nC];
@@ -227,29 +234,27 @@ namespace SpatialMorphology
                                      ? _weights[programNames[p]][channelLabels[c]]
                                      : 1.0;
 
-            // Open matrix form
-            using (var form = new ValueSetMatrixForm(programNames, channelLabels, existing))
-            {
-                if (form.ShowDialog() == DialogResult.OK)
-                {
-                    // Read weights back from form
-                    double[,] newWeights = form.GetWeights();
-                    for (int p = 0; p < nP; p++)
-                    {
-                        if (!_weights.ContainsKey(programNames[p]))
-                            _weights[programNames[p]] = new Dictionary<string, double>();
-                        for (int c = 0; c < nC; c++)
-                            _weights[programNames[p]][channelLabels[c]] =
-                                newWeights[p, c];
-                    }
+            var form = new UI.ValueSetMatrixForm(programNames, channelLabels, existing);
+            form.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow);
 
-                    // Re-run the component to update outputs
-                    ExpireSolution(true);
+            if (form.Confirmed)
+            {
+                double[,] newWeights = form.GetWeights();
+
+                for (int p = 0; p < nP; p++)
+                {
+                    if (!_weights.ContainsKey(programNames[p]))
+                        _weights[programNames[p]] = new Dictionary<string, double>();
+
+                    for (int c = 0; c < nC; c++)
+                        _weights[programNames[p]][channelLabels[c]] = newWeights[p, c];
                 }
+
+                ExpireSolution(true);
             }
         }
 
-        // ── Serialization — save/load weights with the GH file ────────────────
+        // ── Serialization — keys unchanged, do not rename ──────────────────────
         public override bool Write(GH_IO.Serialization.GH_IWriter writer)
         {
             int p = 0;

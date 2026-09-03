@@ -2,76 +2,108 @@
 
 	<PropertyGroup>
 		<TargetFramework>net8.0</TargetFramework>
+
+		<!-- AnyCPU is mandatory: one assembly must load on Windows x64,
+		     Intel Mac, and Apple Silicon. Never add x64 or arm64. -->
 		<PlatformTarget>AnyCPU</PlatformTarget>
 		<Platforms>AnyCPU</Platforms>
+		<BaseOutputPath>bin\</BaseOutputPath>
+		<BaseIntermediateOutputPath>obj\</BaseIntermediateOutputPath>
 		<EnableDynamicLoading>true</EnableDynamicLoading>
-		<UseWindowsForms>true</UseWindowsForms>
-		<LangVersion>10.0</LangVersion>
+
+		<!-- Build a .gha directly instead of producing a .dll and renaming it
+		     in a post-build step. -->
+		<TargetExt>.gha</TargetExt>
+
+		<LangVersion>latest</LangVersion>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>disable</Nullable>
+		<Nullable>enable</Nullable>
+
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<AssemblyName>SpatialMorphology</AssemblyName>
 		<RootNamespace>SpatialMorphology</RootNamespace>
-		<RunPostBuildEvent>Always</RunPostBuildEvent>
+
+		<!-- CS1591: missing XML comment. Turn off until docs are written. -->
+		<NoWarn>NU1701;CS1591</NoWarn>
 	</PropertyGroup>
 
-	<ItemGroup>
-	  <None Remove="Resources\AnalysisStack_24.png" />
-	  <None Remove="Resources\CoreLocation_24.png" />
-	  <None Remove="Resources\NormalizeValues_24.png" />
-	  <None Remove="Resources\ProgramDefinition_24.png" />
-	  <None Remove="Resources\SA_Adjacency_24.png" />
-	  <None Remove="Resources\SA_Depth_24.png" />
-	  <None Remove="Resources\SA_FloorLevel_24.png" />
-	  <None Remove="Resources\SA_GeoDist_24.png" />
-	  <None Remove="Resources\SA_Isovist_24.png" />
-	  <None Remove="Resources\SA_Orientation_24.png" />
-	  <None Remove="Resources\SA_Proximity_24.png" />
-	  <None Remove="Resources\SA_Solar_24.png" />
-	  <None Remove="Resources\SA_ViewAnalysis_24.png" />
-	  <None Remove="Resources\SunVectors_24.png" />
-	  <None Remove="Resources\ValueSet_24.png" />
-	  <None Remove="Resources\VoxelGrid_24.png" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <EmbeddedResource Include="Resources\AnalysisStack_24.png" />
-	  <EmbeddedResource Include="Resources\CoreLocation_24.png" />
-	  <EmbeddedResource Include="Resources\NormalizeValues_24.png" />
-	  <EmbeddedResource Include="Resources\ProgramDefinition_24.png" />
-	  <EmbeddedResource Include="Resources\SA_Adjacency_24.png" />
-	  <EmbeddedResource Include="Resources\SA_Depth_24.png" />
-	  <EmbeddedResource Include="Resources\SA_FloorLevel_24.png" />
-	  <EmbeddedResource Include="Resources\SA_GeoDist_24.png" />
-	  <EmbeddedResource Include="Resources\SA_Isovist_24.png" />
-	  <EmbeddedResource Include="Resources\SA_Orientation_24.png" />
-	  <EmbeddedResource Include="Resources\SA_Proximity_24.png" />
-	  <EmbeddedResource Include="Resources\SA_Solar_24.png" />
-	  <EmbeddedResource Include="Resources\SA_ViewAnalysis_24.png" />
-	  <EmbeddedResource Include="Resources\SunVectors_24.png" />
-	  <EmbeddedResource Include="Resources\ValueSet_24.png" />
-	  <EmbeddedResource Include="Resources\VoxelGrid_24.png" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<PackageReference Include="Grasshopper" Version="8.31.26126.13431">
-			<ExcludeAssets>runtime</ExcludeAssets>
-		</PackageReference>
-		<PackageReference Include="RhinoCommon" Version="8.31.26126.13431">
-			<ExcludeAssets>runtime</ExcludeAssets>
-		</PackageReference>
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="Components\Display\" />
-	</ItemGroup>
-
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-		<Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFiles="$(AppData)\Grasshopper\Libraries\$(AssemblyName).gha" />
+	<!-- Guard: WPF/WinForms silently break macOS. Fail the build if reintroduced. -->
+	<Target Name="FailOnWindowsOnlyUI" BeforeTargets="Build"
+	        Condition="'$(UseWPF)' == 'true' or '$(UseWindowsForms)' == 'true'">
+		<Error Text="UseWPF/UseWindowsForms are not permitted: they break macOS. Use Eto.Forms." />
 	</Target>
 
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-	  <Exec Command="powershell -ExecutionPolicy Bypass -File &quot;$(ProjectDir)deploy.ps1&quot; -Source &quot;$(TargetPath)&quot; -Destination &quot;$(AppData)\Grasshopper\Libraries\$(TargetName).gha&quot;" />
+	<!-- ============ Package references ============================
+	     ExcludeAssets="runtime" + PrivateAssets="all" are BOTH required.
+	     Rhino supplies these assemblies at runtime; copying them next to
+	     the .gha causes assembly-identity conflicts and load failures. -->
+	<ItemGroup>
+		<PackageReference Include="Grasshopper" Version="8.31.26126.13431" ExcludeAssets="runtime" PrivateAssets="all" />
+		<PackageReference Include="RhinoCommon" Version="8.31.26126.13431" ExcludeAssets="runtime" PrivateAssets="all" />
+		<PackageReference Include="Eto.Forms" Version="2.*" ExcludeAssets="runtime" PrivateAssets="all" />
+	</ItemGroup>
+
+	<!-- ============ Embedded icons ================================ -->
+	<ItemGroup>
+		<None Remove="Resources\AnalysisStack_24.png" />
+		<None Remove="Resources\CoreLocation_24.png" />
+		<None Remove="Resources\NormalizeValues_24.png" />
+		<None Remove="Resources\ProgramDefinition_24.png" />
+		<None Remove="Resources\SA_Adjacency_24.png" />
+		<None Remove="Resources\SA_Depth_24.png" />
+		<None Remove="Resources\SA_FloorLevel_24.png" />
+		<None Remove="Resources\SA_GeoDist_24.png" />
+		<None Remove="Resources\SA_Isovist_24.png" />
+		<None Remove="Resources\SA_Orientation_24.png" />
+		<None Remove="Resources\SA_Proximity_24.png" />
+		<None Remove="Resources\SA_Solar_24.png" />
+		<None Remove="Resources\SA_ViewAnalysis_24.png" />
+		<None Remove="Resources\SunVectors_24.png" />
+		<None Remove="Resources\ValueSet_24.png" />
+		<None Remove="Resources\VoxelGrid_24.png" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="Resources\AnalysisStack_24.png" />
+		<EmbeddedResource Include="Resources\CoreLocation_24.png" />
+		<EmbeddedResource Include="Resources\NormalizeValues_24.png" />
+		<EmbeddedResource Include="Resources\ProgramDefinition_24.png" />
+		<EmbeddedResource Include="Resources\SA_Adjacency_24.png" />
+		<EmbeddedResource Include="Resources\SA_Depth_24.png" />
+		<EmbeddedResource Include="Resources\SA_FloorLevel_24.png" />
+		<EmbeddedResource Include="Resources\SA_GeoDist_24.png" />
+		<EmbeddedResource Include="Resources\SA_Isovist_24.png" />
+		<EmbeddedResource Include="Resources\SA_Orientation_24.png" />
+		<EmbeddedResource Include="Resources\SA_Proximity_24.png" />
+		<EmbeddedResource Include="Resources\SA_Solar_24.png" />
+		<EmbeddedResource Include="Resources\SA_ViewAnalysis_24.png" />
+		<EmbeddedResource Include="Resources\SunVectors_24.png" />
+		<EmbeddedResource Include="Resources\ValueSet_24.png" />
+		<EmbeddedResource Include="Resources\VoxelGrid_24.png" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Folder Include="Components\Display\" />
+	</ItemGroup>
+
+	<!-- ============ Local deploy for F5 debugging ==================
+	     Replaces the old duplicated PostBuild targets and deploy.ps1.
+	     Two targets with the same Name silently override each other, so
+	     these are distinctly named and OS-conditioned.
+	     ContinueOnError: never fail a build (or CI) just because Rhino
+	     is not installed on the machine. -->
+	<Target Name="DeployToGrasshopperWindows" AfterTargets="Build"
+	        Condition="'$(OS)' == 'Windows_NT'">
+		<Copy SourceFiles="$(TargetPath)"
+		      DestinationFolder="$(AppData)\Grasshopper\Libraries"
+		      ContinueOnError="true" />
+	</Target>
+
+	<Target Name="DeployToGrasshopperMac" AfterTargets="Build"
+	        Condition="'$(OS)' != 'Windows_NT'">
+		<Copy SourceFiles="$(TargetPath)"
+		      DestinationFolder="$(HOME)/Library/Application Support/McNeel/Rhinoceros/8.0/Plug-ins/Grasshopper (b45a29b1-4343-4035-989e-044e8580d9cf)/Libraries"
+		      ContinueOnError="true" />
 	</Target>
 
 </Project>

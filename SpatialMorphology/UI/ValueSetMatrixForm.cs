@@ -1,302 +1,256 @@
 ﻿// -*- coding: utf-8 -*-
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Windows.Forms;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using Eto.Drawing;
+using Eto.Forms;
 
-namespace SpatialMorphology
+namespace SpatialMorphology.UI
 {
-    public class ValueSetMatrixForm : Form
+    /// <summary>
+    /// Cross-platform (Eto.Forms) replacement for the WinForms DataGridView
+    /// weight-matrix editor. Runs on Rhino 8 for both Windows and macOS.
+    /// </summary>
+    /// <remarks>
+    /// Public contract is unchanged from the WinForms version: construct with
+    /// (programNames, channelLabels, existingWeights), show it modally, then
+    /// check <see cref="Confirmed"/> and read <see cref="GetWeights"/>.
+    /// <para>
+    /// The per-cell heat-map colouring from the WinForms version has been
+    /// removed deliberately. Eto has no independently addressable cells, so it
+    /// had to be produced from the <c>CellFormatting</c> event, which runs
+    /// inside the platform draw loop — an exception there terminates the host
+    /// process (Rhino) instead of surfacing as a managed error. The sign of a
+    /// weight is still readable because values are formatted with an explicit
+    /// +/- prefix.
+    /// </para>
+    /// </remarks>
+    public class ValueSetMatrixForm : Dialog
     {
         // ── Private fields ────────────────────────────────────────────────────
-
         private readonly List<string> _programNames;
         private readonly List<string> _channelLabels;
-        private readonly double[,]   _weights;
-        private readonly DataGridView _grid;
-        private readonly Button       _okButton;
-        private readonly Button       _cancelButton;
-        private readonly Button       _resetButton;
-        private bool _confirmed = false;
+        private readonly ObservableCollection<WeightRow> _rows;
+        private bool _confirmed;
+
+        /// <summary>One grid row: a program name plus its channel multipliers.</summary>
+        private sealed class WeightRow
+        {
+            public string Program { get; }
+
+            /// <summary>Multipliers for this program, indexed by channel.</summary>
+            public double[] Values { get; }
+
+            public WeightRow(string program, double[] values)
+            {
+                Program = program;
+                Values = values;
+            }
+
+            public string Get(int channel)
+            {
+                if (channel < 0 || channel >= Values.Length) return string.Empty;
+                return Values[channel].ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture);
+            }
+
+            public void Set(int channel, string? text)
+            {
+                if (channel < 0 || channel >= Values.Length) return;
+                if (string.IsNullOrWhiteSpace(text)) return;
+
+                if (double.TryParse(text.Trim(),
+                                    NumberStyles.Float,
+                                    CultureInfo.InvariantCulture,
+                                    out double parsed))
+                {
+                    Values[channel] = parsed;
+                }
+                // Unparseable input is ignored, which replaces the WinForms
+                // DataError handler. The grid re-reads the getter and the old
+                // value reappears.
+            }
+        }
 
         // ── Constructor ───────────────────────────────────────────────────────
-
+        /// <summary>Creates the editor.</summary>
+        /// <param name="programNames">Row labels, in order.</param>
+        /// <param name="channelLabels">Column headers, in order.</param>
+        /// <param name="existingWeights">Current multipliers, indexed [program, channel]. May be null.</param>
         public ValueSetMatrixForm(
             List<string> programNames,
             List<string> channelLabels,
             double[,] existingWeights)
         {
-            _programNames  = programNames;
-            _channelLabels = channelLabels;
+            _programNames = programNames ?? throw new ArgumentNullException(nameof(programNames));
+            _channelLabels = channelLabels ?? throw new ArgumentNullException(nameof(channelLabels));
 
-            int nP = programNames.Count;
-            int nC = channelLabels.Count;
-            _weights = new double[nP, nC];
+            int nP = _programNames.Count;
+            int nC = _channelLabels.Count;
 
+            // ── Rows ──────────────────────────────────────────────────────────
+            _rows = new ObservableCollection<WeightRow>();
             for (int p = 0; p < nP; p++)
+            {
+                var values = new double[nC];
                 for (int c = 0; c < nC; c++)
-                    _weights[p, c] = (existingWeights != null &&
-                                      existingWeights.GetLength(0) > p &&
-                                      existingWeights.GetLength(1) > c)
-                                     ? existingWeights[p, c]
-                                     : 1.0;
+                {
+                    values[c] = (existingWeights != null &&
+                                 existingWeights.GetLength(0) > p &&
+                                 existingWeights.GetLength(1) > c)
+                                ? existingWeights[p, c]
+                                : 1.0;
+                }
+                _rows.Add(new WeightRow(_programNames[p], values));
+            }
 
-            // ── Form setup ────────────────────────────────────────────────────
-            this.Text            = "ValueSet — Program x Channel Weights";
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition   = FormStartPosition.CenterScreen;
-            this.MinimizeBox     = false;
-            this.MaximizeBox     = false;
-            this.BackColor       = Color.FromArgb(240, 240, 240);
-            this.Font            = new Font("Segoe UI", 9f);
+            // ── Dialog setup ──────────────────────────────────────────────────
+            // No Segoe UI: that font does not exist on macOS. Use the system default.
+            Title = "ValueSet - Program x Channel Weights";
+            Padding = new Padding(8);
+            Resizable = true;
 
-            // ── Instructions label ────────────────────────────────────────────
+            // ── Instructions ──────────────────────────────────────────────────
             var label = new Label
             {
-                Text      = "Set multipliers for each program x channel pair.\r\n" +
-                            "+1.0 = prefer HIGH   |   -1.0 = prefer LOW   |   0.0 = ignore",
-                Dock      = DockStyle.Top,
-                Height    = 40,
-                Padding   = new Padding(8, 8, 8, 0),
-                ForeColor = Color.FromArgb(60, 60, 60),
+                Text = "Set multipliers for each program x channel pair.\n" +
+                       "+1.0 = prefer HIGH   |   -1.0 = prefer LOW   |   0.0 = ignore"
             };
 
-            // ── DataGridView ──────────────────────────────────────────────────
-            _grid = new DataGridView
+            // ── Grid ──────────────────────────────────────────────────────────
+            // Eto has no row headers, so the program name becomes a read-only
+            // first column instead.
+            var grid = new GridView
             {
-                Dock                  = DockStyle.Fill,
-                AllowUserToAddRows    = false,
-                AllowUserToDeleteRows = false,
-                AllowUserToResizeRows = false,
-                RowHeadersWidth       = 120,
-                ColumnHeadersHeight   = 32,
-                BackgroundColor       = Color.White,
-                BorderStyle           = BorderStyle.None,
-                GridColor             = Color.FromArgb(200, 200, 200),
-                SelectionMode         = DataGridViewSelectionMode.CellSelect,
-                EditMode              = DataGridViewEditMode.EditOnEnter,
+                DataStore = _rows,
+                ShowHeader = true,
+                GridLines = GridLines.Both,
+                AllowMultipleSelection = false,
+                RowHeight = 24
             };
 
-            _grid.ColumnHeadersDefaultCellStyle.BackColor  = Color.FromArgb(50, 50, 50);
-            _grid.ColumnHeadersDefaultCellStyle.ForeColor  = Color.White;
-            _grid.ColumnHeadersDefaultCellStyle.Font       = new Font("Segoe UI", 9f, FontStyle.Bold);
-            _grid.ColumnHeadersDefaultCellStyle.Alignment  = DataGridViewContentAlignment.MiddleCenter;
-            _grid.RowHeadersDefaultCellStyle.BackColor     = Color.FromArgb(70, 70, 70);
-            _grid.RowHeadersDefaultCellStyle.ForeColor     = Color.White;
-            _grid.RowHeadersDefaultCellStyle.Font          = new Font("Segoe UI", 9f, FontStyle.Bold);
-            _grid.EnableHeadersVisualStyles               = false;
+            grid.Columns.Add(new GridColumn
+            {
+                HeaderText = "Program",
+                Editable = false,
+                Width = 130,
+                Resizable = true,
+                DataCell = new TextBoxCell
+                {
+                    Binding = Binding.Delegate<WeightRow, string>(r => r.Program)
+                }
+            });
 
-            // Add columns — one per channel
             for (int c = 0; c < nC; c++)
             {
-                _grid.Columns.Add(new DataGridViewTextBoxColumn
+                int channel = c;   // capture per iteration
+
+                grid.Columns.Add(new GridColumn
                 {
-                    HeaderText = channelLabels[c],
-                    Width      = 90,
-                    SortMode   = DataGridViewColumnSortMode.NotSortable,
-                    DefaultCellStyle = new DataGridViewCellStyle
+                    HeaderText = _channelLabels[c],
+                    Editable = true,
+                    Width = 90,
+                    Resizable = true,
+                    DataCell = new TextBoxCell
                     {
-                        Alignment = DataGridViewContentAlignment.MiddleCenter,
-                        Format    = "0.00",
+                        Binding = Binding.Delegate<WeightRow, string>(
+                            r => r.Get(channel),
+                            (r, v) => r.Set(channel, v))
                     }
                 });
             }
 
-            // Add rows — one per program
-            for (int p = 0; p < nP; p++)
-            {
-                var row = new DataGridViewRow();
-                row.HeaderCell.Value = programNames[p];
-                row.Height           = 28;
-                _grid.Rows.Add(row);
-
-                for (int c = 0; c < nC; c++)
-                    _grid.Rows[p].Cells[c].Value = _weights[p, c];
-            }
-
-            _grid.CellValueChanged  += OnCellValueChanged;
-            _grid.CellEndEdit       += OnCellEndEdit;
-            _grid.DataError         += OnDataError;
-
-            ColorAllCells();
-
             // ── Buttons ───────────────────────────────────────────────────────
-            var buttonPanel = new Panel
-            {
-                Dock   = DockStyle.Bottom,
-                Height = 44,
-            };
+            var applyButton = new Button { Text = "Apply", Width = 80 };
+            applyButton.Click += OnApplyClick;
 
-            _okButton = new Button
-            {
-                Text      = "Apply",
-                Width     = 80,
-                Height    = 28,
-                Location  = new Point(8, 8),
-                BackColor = Color.FromArgb(50, 120, 200),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-            };
-            _okButton.FlatAppearance.BorderSize = 0;
-            _okButton.Click += OnOkClick;
+            var cancelButton = new Button { Text = "Cancel", Width = 80 };
+            cancelButton.Click += OnCancelClick;
 
-            _cancelButton = new Button
-            {
-                Text      = "Cancel",
-                Width     = 80,
-                Height    = 28,
-                Location  = new Point(96, 8),
-                BackColor = Color.FromArgb(180, 180, 180),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-            };
-            _cancelButton.FlatAppearance.BorderSize = 0;
-            _cancelButton.Click += OnCancelClick;
+            var resetButton = new Button { Text = "Reset to 1.0", Width = 100 };
+            resetButton.Click += OnResetClick;
 
-            _resetButton = new Button
-            {
-                Text      = "Reset to 1.0",
-                Width     = 100,
-                Height    = 28,
-                Location  = new Point(184, 8),
-                BackColor = Color.FromArgb(100, 100, 100),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-            };
-            _resetButton.FlatAppearance.BorderSize = 0;
-            _resetButton.Click += OnResetClick;
+            DefaultButton = applyButton;
+            AbortButton = cancelButton;
 
-            buttonPanel.Controls.Add(_okButton);
-            buttonPanel.Controls.Add(_cancelButton);
-            buttonPanel.Controls.Add(_resetButton);
+            var buttonRow = new StackLayout
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Items =
+                {
+                    applyButton,
+                    cancelButton,
+                    resetButton,
+                    new StackLayoutItem(null, expand: true)
+                }
+            };
 
             // ── Layout ────────────────────────────────────────────────────────
-            int formWidth  = Math.Max(400, 140 + nC * 90);
-            int formHeight = Math.Max(200, 140 + nP * 28);
-
-            this.ClientSize = new Size(formWidth, formHeight);
-            this.Controls.Add(_grid);
-            this.Controls.Add(label);
-            this.Controls.Add(buttonPanel);
-
-            this.AcceptButton = _okButton;
-            this.CancelButton = _cancelButton;
-        }
-
-        // ── Cell coloring ─────────────────────────────────────────────────────
-
-        private void ColorAllCells()
-        {
-            int nP = _programNames.Count;
-            int nC = _channelLabels.Count;
-            for (int p = 0; p < nP; p++)
-                for (int c = 0; c < nC; c++)
-                    ColorCell(p, c);
-        }
-
-        private void ColorCell(int p, int c)
-        {
-            if (p >= _grid.Rows.Count || c >= _grid.Columns.Count) return;
-            var cell = _grid.Rows[p].Cells[c];
-            double val = _weights[p, c];
-
-            if (val > 0)
+            Content = new StackLayout
             {
-                double t = Math.Min(val / 2.0, 1.0);
-                cell.Style.BackColor = Lerp(Color.White, Color.FromArgb(50, 150, 255), t);
-                cell.Style.ForeColor = t > 0.5 ? Color.White : Color.Black;
-            }
-            else if (val < 0)
-            {
-                double t = Math.Min(Math.Abs(val) / 2.0, 1.0);
-                cell.Style.BackColor = Lerp(Color.White, Color.FromArgb(220, 60, 60), t);
-                cell.Style.ForeColor = t > 0.5 ? Color.White : Color.Black;
-            }
-            else
-            {
-                cell.Style.BackColor = Color.FromArgb(240, 240, 240);
-                cell.Style.ForeColor = Color.FromArgb(150, 150, 150);
-            }
+                Orientation = Orientation.Vertical,
+                Spacing = 8,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Items =
+                {
+                    label,
+                    new StackLayoutItem(grid, expand: true),
+                    buttonRow
+                }
+            };
+
+            int width = Math.Max(420, 150 + nC * 90);
+            int height = Math.Max(240, 150 + nP * 24);
+            ClientSize = new Size(Math.Min(width, 1200), Math.Min(height, 800));
+
+            // Kept as a field only so Reset can refresh it.
+            _grid = grid;
         }
 
-        private static Color Lerp(Color a, Color b, double t)
-        {
-            return Color.FromArgb(
-                (int)(a.R + (b.R - a.R) * t),
-                (int)(a.G + (b.G - a.G) * t),
-                (int)(a.B + (b.B - a.B) * t));
-        }
+        private readonly GridView _grid;
 
         // ── Event handlers ────────────────────────────────────────────────────
-
-        private void OnCellEndEdit(object? sender, DataGridViewCellEventArgs e)
+        private void OnApplyClick(object? sender, EventArgs e)
         {
-            var cell = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
-            if (double.TryParse(cell.Value?.ToString(), out double val))
-            {
-                _weights[e.RowIndex, e.ColumnIndex] = val;
-                ColorCell(e.RowIndex, e.ColumnIndex);
-            }
-        }
-
-        private void OnCellValueChanged(object? sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            var cell = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
-            if (double.TryParse(cell.Value?.ToString(), out double val))
-            {
-                _weights[e.RowIndex, e.ColumnIndex] = val;
-                ColorCell(e.RowIndex, e.ColumnIndex);
-            }
-        }
-
-        private void OnDataError(object? sender, DataGridViewDataErrorEventArgs e)
-        {
-            e.Cancel = true;
-        }
-
-        private void OnOkClick(object? sender, EventArgs e)
-        {
-            // Commit any active edit before closing
-            _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
             _confirmed = true;
-            this.DialogResult = DialogResult.OK;
-            this.Close();
+            Close();
         }
 
         private void OnCancelClick(object? sender, EventArgs e)
         {
             _confirmed = false;
-            this.DialogResult = DialogResult.Cancel;
-            this.Close();
+            Close();
         }
 
         private void OnResetClick(object? sender, EventArgs e)
         {
-            int nP = _programNames.Count;
-            int nC = _channelLabels.Count;
-            for (int p = 0; p < nP; p++)
-                for (int c = 0; c < nC; c++)
-                {
-                    _weights[p, c]              = 1.0;
-                    _grid.Rows[p].Cells[c].Value = 1.0;
-                    ColorCell(p, c);
-                }
+            foreach (var row in _rows)
+                for (int c = 0; c < row.Values.Length; c++)
+                    row.Values[c] = 1.0;
+
+            // Re-assigning the data store is the safe way to force a full
+            // refresh; calling Invalidate() during an active edit can re-enter
+            // the draw loop.
+            _grid.DataStore = _rows;
         }
 
         // ── Public accessors ──────────────────────────────────────────────────
-
-        /// <summary>
-        /// Returns true if the user clicked Apply (not Cancel).
-        /// </summary>
+        /// <summary>True if the user clicked Apply (not Cancel).</summary>
         public bool Confirmed => _confirmed;
 
-        /// <summary>
-        /// Returns the full weights matrix [program, channel].
-        /// </summary>
+        /// <summary>Returns the full weights matrix, indexed [program, channel].</summary>
         public double[,] GetWeights()
         {
-            return _weights;
+            int nP = _programNames.Count;
+            int nC = _channelLabels.Count;
+            var result = new double[nP, nC];
+
+            for (int p = 0; p < nP && p < _rows.Count; p++)
+                for (int c = 0; c < nC; c++)
+                    result[p, c] = _rows[p].Values[c];
+
+            return result;
         }
     }
 }

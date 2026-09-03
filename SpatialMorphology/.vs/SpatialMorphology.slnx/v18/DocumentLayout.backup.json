@@ -3,11 +3,23 @@
   "WorkspaceRootPath": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\.gitignore||{3B902123-F8A7-4915-9F01-361F908088D0}"
+      "AbsoluteMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|c:\\users\\mprado1\\onedrive - university of tennessee\\01_research\\01_computational resources\\git\\spatial-morphology\\spatialmorphology\\components\\setup\\valuesetcomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|solutionrelative:components\\setup\\valuesetcomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|c:\\users\\mprado1\\onedrive - university of tennessee\\01_research\\01_computational resources\\git\\spatial-morphology\\spatialmorphology\\components\\main\\analysisstackcomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|solutionrelative:components\\main\\analysisstackcomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|c:\\users\\mprado1\\onedrive - university of tennessee\\01_research\\01_computational resources\\git\\spatial-morphology\\spatialmorphology\\ui\\valuesetmatrixform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|solutionrelative:ui\\valuesetmatrixform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|c:\\users\\mprado1\\onedrive - university of tennessee\\01_research\\01_computational resources\\git\\spatial-morphology\\spatialmorphology\\spatialmorphology.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
+      "RelativeMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|solutionrelative:spatialmorphology.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|c:\\users\\mprado1\\onedrive - university of tennessee\\01_research\\01_computational resources\\git\\spatial-morphology\\spatialmorphology\\ui\\valuesetmatrixform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{99F62CED-E533-4358-5CCD-8F93AD4E15AD}|SpatialMorphology.csproj|solutionrelative:ui\\valuesetmatrixform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\.gitignore||{3B902123-F8A7-4915-9F01-361F908088D0}"
     }
   ],
   "DocumentGroupContainers": [
@@ -17,37 +29,70 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 2,
           "Children": [
             {
               "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "ValueSetMatrixForm.cs",
+              "DocumentMoniker": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\UI\\ValueSetMatrixForm.cs",
+              "RelativeDocumentMoniker": "UI\\ValueSetMatrixForm.cs",
+              "ToolTip": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\UI\\ValueSetMatrixForm.cs",
+              "RelativeToolTip": "UI\\ValueSetMatrixForm.cs",
+              "ViewState": "AgIAANkAAAAAAAAAAAAwwAABAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-09-03T02:08:44.787Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "ValueSetMatrixForm.cs [Design]",
+              "DocumentMoniker": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\UI\\ValueSetMatrixForm.cs",
+              "RelativeDocumentMoniker": "UI\\ValueSetMatrixForm.cs",
+              "ToolTip": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\UI\\ValueSetMatrixForm.cs [Design]",
+              "RelativeToolTip": "UI\\ValueSetMatrixForm.cs [Design]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-09-03T02:08:40.275Z",
+              "EditorCaption": " [Design]"
+            },
+            {
+              "$type": "Document",
               "DocumentIndex": 0,
+              "Title": "ValueSetComponent.cs",
+              "DocumentMoniker": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\Components\\Setup\\ValueSetComponent.cs",
+              "RelativeDocumentMoniker": "Components\\Setup\\ValueSetComponent.cs",
+              "ToolTip": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\Components\\Setup\\ValueSetComponent.cs",
+              "RelativeToolTip": "Components\\Setup\\ValueSetComponent.cs",
+              "ViewState": "AgIAANwAAAAAAAAAAIAwwPEAAAAjAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-09-03T02:04:35.303Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "SpatialMorphology.csproj",
+              "DocumentMoniker": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\SpatialMorphology.csproj",
+              "RelativeDocumentMoniker": "SpatialMorphology.csproj",
+              "ToolTip": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\SpatialMorphology.csproj",
+              "RelativeToolTip": "SpatialMorphology.csproj",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAG0AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2026-09-03T01:43:23.878Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
               "Title": ".gitignore",
               "DocumentMoniker": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\.gitignore",
               "RelativeDocumentMoniker": "..\\.gitignore",
               "ToolTip": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\.gitignore",
               "RelativeToolTip": "..\\.gitignore",
-              "ViewState": "AgIAAJwAAAAAAAAAAAAAALYAAAAGAAAAAAAAAA==",
+              "ViewState": "AgIAAJ4AAAAAAAAAAAAUwLYAAAAGAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
-              "WhenOpened": "2026-09-02T17:52:08.313Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
-              "Title": "AnalysisStackComponent.cs",
-              "DocumentMoniker": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\Components\\Main\\AnalysisStackComponent.cs",
-              "RelativeDocumentMoniker": "Components\\Main\\AnalysisStackComponent.cs",
-              "ToolTip": "C:\\Users\\mprado1\\OneDrive - University of Tennessee\\01_Research\\01_Computational Resources\\Git\\Spatial-Morphology\\SpatialMorphology\\Components\\Main\\AnalysisStackComponent.cs",
-              "RelativeToolTip": "Components\\Main\\AnalysisStackComponent.cs",
-              "ViewState": "AgIAAKwCAAAAAAAAAAAqwMACAAAFAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-23T04:04:47.995Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
+              "WhenOpened": "2026-09-02T17:52:08.313Z"
             }
           ]
         }
