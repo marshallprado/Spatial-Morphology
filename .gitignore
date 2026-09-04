@@ -181,3 +181,13 @@ pyrightconfig.json
 .DS_Store
 .idea/
 *.user
+
+### .NET ###
+[Bb]in/
+[Oo]bj/
+.vs/
+*.suo
+*.user
+*.slnx.docstates
+[Dd]ebug/
+[Rr]elease/
