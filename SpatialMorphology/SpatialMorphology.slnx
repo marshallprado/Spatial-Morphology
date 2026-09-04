@@ -4,6 +4,7 @@
     <Platform Name="ARM64" />
     <Platform Name="x64" />
   </Configurations>
+  <Project Path="../SpatialMorphology.Core/SpatialMorphology.Core.csproj" />
   <Project Path="SpatialMorphology.csproj">
     <Platform Solution="*|x64" Project="x64" />
     <Platform Solution="Debug|Any CPU" Project="x64" />

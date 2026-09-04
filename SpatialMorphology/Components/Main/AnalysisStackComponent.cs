@@ -11,6 +11,10 @@ using Rhino.Geometry;
 
 namespace SpatialMorphology
 {
+    /// <summary>
+    /// Thin Grasshopper adapter over <see cref="VoxelScoringEngine"/>.
+    /// Reads inputs, calls Core, builds DataTrees. No scoring logic lives here.
+    /// </summary>
     public class AnalysisStackComponent : GH_Component
     {
         // ── Constructor ───────────────────────────────────────────────────────
@@ -36,7 +40,7 @@ namespace SpatialMorphology
                 "Main")
         { }
 
-        // ── GUID ──────────────────────────────────────────────────────────────
+        // ── GUID — DO NOT CHANGE ──────────────────────────────────────────────
         public override Guid ComponentGuid =>
             new Guid("C3D4E5F6-A7B8-9012-CDEF-012345678908");
 
@@ -48,11 +52,11 @@ namespace SpatialMorphology
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
                 var stream = assembly.GetManifestResourceStream(
                     "SpatialMorphology.Resources.AnalysisStack_24.png");
-                return stream != null ? new Bitmap(stream) : null;
+                return stream != null ? new Bitmap(stream) : null!;
             }
         }
 
-        // ── Parameters ────────────────────────────────────────────────────────
+        // ── Parameters — order and nicknames unchanged ────────────────────────
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddGenericParameter("voxel_grid", "VG",
@@ -126,7 +130,7 @@ namespace SpatialMorphology
         protected override void SolveInstance(IGH_DataAccess DA)
         {
             // ── Collect inputs ────────────────────────────────────────────────
-            object voxelGridObj = null;
+            object? voxelGridObj = null;
             var analysisTree = new GH_Structure<IGH_Goo>();
             var programObjects = new List<object>();
             var valueSetTree = new GH_Structure<IGH_Goo>();
@@ -160,46 +164,14 @@ namespace SpatialMorphology
                 return;
             }
 
-            // ── Flatten analysis DataTree ─────────────────────────────────────
-            var analysisObjects = new List<object>();
-            foreach (var branch in analysisTree.Branches)
-                foreach (var item in branch)
-                    analysisObjects.Add(item);
-
-            // ── Flatten value_sets DataTree ───────────────────────────────────
-            var valueSetObjects = new List<object>();
-            foreach (var branch in valueSetTree.Branches)
-                foreach (var item in branch)
-                    valueSetObjects.Add(item);
-
             // ── Unwrap SpatialAnalysis objects ────────────────────────────────
             var saList = new List<SpatialAnalysis>();
-            foreach (var obj in analysisObjects)
-            {
-                var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
-                if (inner is SpatialAnalysis sa)
+            foreach (var branch in analysisTree.Branches)
+                foreach (var item in branch)
                 {
-                    saList.Add(sa);
-                    continue;
+                    var sa = UnwrapAnalysis(item);
+                    if (sa != null) saList.Add(sa);
                 }
-                if (inner != null)
-                {
-                    try
-                    {
-                        dynamic d = inner;
-                        string lbl = d.label?.ToString();
-                        var vals = d.values;
-                        if (!string.IsNullOrWhiteSpace(lbl) && vals != null)
-                        {
-                            var vlist = new List<double>();
-                            foreach (var v in vals)
-                                vlist.Add(Convert.ToDouble(v));
-                            saList.Add(new SpatialAnalysis(lbl, vlist));
-                        }
-                    }
-                    catch { }
-                }
-            }
 
             if (saList.Count == 0)
             {
@@ -212,29 +184,8 @@ namespace SpatialMorphology
             var progList = new List<ProgramDefinition>();
             foreach (var obj in programObjects)
             {
-                var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
-                if (inner is ProgramDefinition pd)
-                {
-                    progList.Add(pd);
-                    continue;
-                }
-                if (inner != null)
-                {
-                    try
-                    {
-                        dynamic dyn = inner;
-                        string nm = dyn.name?.ToString();
-                        int vc = Convert.ToInt32(dyn.voxel_count);
-                        dynamic dc = dyn.color;
-                        int r = Convert.ToInt32(dc.R);
-                        int g = Convert.ToInt32(dc.G);
-                        int b = Convert.ToInt32(dc.B);
-                        if (!string.IsNullOrWhiteSpace(nm))
-                            progList.Add(new ProgramDefinition(
-                                nm, Color.FromArgb(255, r, g, b), vc));
-                    }
-                    catch { }
-                }
+                var pd = UnwrapProgram(obj);
+                if (pd != null) progList.Add(pd);
             }
 
             if (progList.Count == 0)
@@ -246,271 +197,43 @@ namespace SpatialMorphology
 
             // ── Unwrap ValueSet objects ───────────────────────────────────────
             var vsList = new List<ValueSet>();
-            foreach (var obj in valueSetObjects)
-            {
-                var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
-                if (inner is ValueSet vs)
+            foreach (var branch in valueSetTree.Branches)
+                foreach (var item in branch)
                 {
-                    vsList.Add(vs);
-                    continue;
+                    var vs = UnwrapValueSet(item);
+                    if (vs != null) vsList.Add(vs);
                 }
-                if (inner != null)
-                {
-                    try
-                    {
-                        dynamic dyn = inner;
-                        string pnm = dyn.program_name?.ToString();
-                        dynamic wts = dyn.weights;
-                        if (!string.IsNullOrWhiteSpace(pnm) && wts != null)
-                        {
-                            var wd = new Dictionary<string, double>();
-                            foreach (var kvp in wts)
-                                wd[kvp.Key.ToString()] = Convert.ToDouble(kvp.Value);
-                            vsList.Add(new ValueSet(pnm, wd));
-                        }
-                    }
-                    catch { }
-                }
-            }
 
-            // ── Validate channel lengths ──────────────────────────────────────
+            // ── Call the Core engine ──────────────────────────────────────────
+            // ProgramSpec carries only what scoring needs. Colour stays here,
+            // because System.Drawing.Common is Windows-only from .NET 6 on and
+            // must not be pulled into netstandard2.0 Core.
             int n = voxelGrid.FilledKeys.Count;
-            foreach (var sa in saList)
-            {
-                if (sa.Values.Count != n)
-                {
-                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
-                        string.Format(
-                            "Channel '{0}' has {1} values but voxel_grid has {2} voxels.",
-                            sa.Label, sa.Values.Count, n));
-                    return;
-                }
-            }
 
-            // ── Build core voxel set ──────────────────────────────────────────
-            var coreSet = new HashSet<int>();
-            if (useCore && coreIdxInput.Count > 0)
-            {
-                foreach (var idx in coreIdxInput)
-                    if (idx >= 0 && idx < n)
-                        coreSet.Add(idx);
-            }
-
-            // ── Step 1: Normalize SA channels ─────────────────────────────────
-            var labels = new List<string>();
-            var channels = new Dictionary<string, List<double>>();
-            var raw = new Dictionary<string, List<double>>();
-            var seen = new HashSet<string>();
-
-            foreach (var sa in saList)
-            {
-                if (seen.Contains(sa.Label))
-                {
-                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
-                        string.Format("Duplicate channel label '{0}'.", sa.Label));
-                    return;
-                }
-
-                var sanitized = new List<double>();
-                foreach (var v in sa.Values)
-                    sanitized.Add(double.IsNaN(v) || v == double.PositiveInfinity
-                        ? 0.0 : v);
-
-                double lo = sanitized.Min();
-                double hi = sanitized.Max();
-                double rng = hi - lo;
-
-                var norm = rng > 1e-12
-                    ? sanitized.Select(v => (v - lo) / rng).ToList()
-                    : Enumerable.Repeat(0.0, n).ToList();
-
-                seen.Add(sa.Label);
-                labels.Add(sa.Label);
-                raw[sa.Label] = sanitized;
-                channels[sa.Label] = norm;
-            }
-
-            // ── Step 2: Build multiplier table from ValueSets ─────────────────
-            var valueSetMap = new Dictionary<string, Dictionary<string, double>>();
-            foreach (var vs in vsList)
-                valueSetMap[vs.ProgramName] = vs.Weights;
-
-            // ── Step 3: Score every voxel for every program ───────────────────
-            int nPrograms = progList.Count;
-            var rawScores = new List<List<double>>();
-
-            for (int pIdx = 0; pIdx < nPrograms; pIdx++)
-            {
-                var prog = progList[pIdx];
-                var weights = valueSetMap.ContainsKey(prog.Name)
-                    ? valueSetMap[prog.Name] : null;
-                var s = new List<double>(new double[n]);
-
-                foreach (var lbl in labels)
-                {
-                    var ch = channels[lbl];
-                    double m = (weights != null && weights.ContainsKey(lbl))
-                        ? weights[lbl] : 1.0;
-
-                    if (m == 0.0) continue;
-
-                    if (m > 0)
-                        for (int i = 0; i < n; i++)
-                            s[i] += m * ch[i];
-                    else
-                    {
-                        double absM = Math.Abs(m);
-                        for (int i = 0; i < n; i++)
-                            s[i] += absM * (1.0 - ch[i]);
-                    }
-                }
-                rawScores.Add(s);
-            }
-
-            // ── Step 4: Assign voxels to programs ─────────────────────────────
-            // Core voxels are excluded from program assignment
-            var programIndices = new List<int>(new int[n]);
-            var winningScore = new List<double>(new double[n]);
-            var assigned = new HashSet<int>();
-
-            // Pre-mark core voxels as reserved (-2)
-            for (int i = 0; i < n; i++)
-                programIndices[i] = -1;
-
-            if (useCore)
-                foreach (var idx in coreSet)
-                    programIndices[idx] = -2; // reserved for core
-
-            // Build eligible voxels (not core)
-            var eligibleVoxels = Enumerable.Range(0, n)
-                .Where(i => programIndices[i] != -2)
+            var specs = progList
+                .Select(p => new ProgramSpec(p.Name, p.VoxelCount))
                 .ToList();
 
-            // Score eligible voxels
-            if (method == 0)
+            var coreVoxels = useCore
+                ? coreIdxInput.Where(i => i >= 0 && i < n).ToList()
+                : new List<int>();
+
+            ScoringResult result;
+            try
             {
-                // Method 0 — Highest score first globally
-                var allScores = new List<(double score, int voxel, int program)>();
-                foreach (var v in eligibleVoxels)
-                    for (int p = 0; p < nPrograms; p++)
-                        allScores.Add((rawScores[p][v], v, p));
-
-                allScores.Sort((a, b) => b.score.CompareTo(a.score));
-
-                var programCounts = new int[nPrograms];
-
-                foreach (var (score, v, p) in allScores)
-                {
-                    if (assigned.Contains(v)) continue;
-
-                    var prog = progList[p];
-                    if (!showAll && prog.VoxelCount >= 0 &&
-                        programCounts[p] >= prog.VoxelCount)
-                        continue;
-
-                    programIndices[v] = p;
-                    winningScore[v] = score;
-                    assigned.Add(v);
-                    programCounts[p]++;
-
-                    // Tie-break: prefer program with fewer assigned voxels
-                    // already handled by processing in score order
-                }
+                result = VoxelScoringEngine.Run(
+                    n,
+                    saList,
+                    specs,
+                    vsList,
+                    showAll,
+                    (AssignmentMethod)method,
+                    coreVoxels);
             }
-            else if (method == 1)
+            catch (ScoringInputException ex)
             {
-                // Method 1 — Round-robin
-                var programCounts = new int[nPrograms];
-                var programQueues = new List<Queue<(double score, int voxel)>>();
-
-                for (int p = 0; p < nPrograms; p++)
-                {
-                    var sorted = eligibleVoxels
-                        .Select(v => (rawScores[p][v], v))
-                        .OrderByDescending(x => x.Item1)
-                        .ToList();
-                    programQueues.Add(new Queue<(double, int)>(sorted));
-                }
-
-                bool anyActive = true;
-                while (anyActive)
-                {
-                    anyActive = false;
-                    for (int p = 0; p < nPrograms; p++)
-                    {
-                        var prog = progList[p];
-                        if (!showAll && prog.VoxelCount >= 0 &&
-                            programCounts[p] >= prog.VoxelCount)
-                            continue;
-
-                        while (programQueues[p].Count > 0)
-                        {
-                            var (score, v) = programQueues[p].Dequeue();
-                            if (assigned.Contains(v)) continue;
-
-                            programIndices[v] = p;
-                            winningScore[v] = score;
-                            assigned.Add(v);
-                            programCounts[p]++;
-                            anyActive = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // Method 2 — Per program
-                var programCounts = new int[nPrograms];
-
-                for (int p = 0; p < nPrograms; p++)
-                {
-                    var prog = progList[p];
-                    var sorted = eligibleVoxels
-                        .Where(v => !assigned.Contains(v))
-                        .OrderByDescending(v => rawScores[p][v])
-                        .ToList();
-
-                    foreach (var v in sorted)
-                    {
-                        if (!showAll && prog.VoxelCount >= 0 &&
-                            programCounts[p] >= prog.VoxelCount)
-                            break;
-
-                        programIndices[v] = p;
-                        winningScore[v] = rawScores[p][v];
-                        assigned.Add(v);
-                        programCounts[p]++;
-                    }
-                }
-            }
-
-            // ── Step 5: Rank voxels per program best→worst ────────────────────
-            var ranked = new List<List<int>>();
-            for (int p = 0; p < nPrograms; p++)
-            {
-                var pVoxels = Enumerable.Range(0, n)
-                    .Where(v => programIndices[v] == p)
-                    .OrderByDescending(v => winningScore[v])
-                    .ToList();
-                ranked.Add(pVoxels);
-            }
-
-            // ── Step 6: Global alpha mapping ──────────────────────────────────
-            var assignedScores = Enumerable.Range(0, n)
-                .Where(v => programIndices[v] >= 0)
-                .Select(v => winningScore[v])
-                .ToList();
-
-            double gLo = assignedScores.Count > 0 ? assignedScores.Min() : 0.0;
-            double gHi = assignedScores.Count > 0 ? assignedScores.Max() : 0.0;
-
-            int AlphaFor(int v)
-            {
-                if (programIndices[v] < 0) return 40;
-                double sc = winningScore[v];
-                double t = gHi > gLo ? (sc - gLo) / (gHi - gLo) : 0.0;
-                return Math.Max(50, Math.Min(255, (int)Math.Round(50 + t * 205)));
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, ex.Message);
+                return;
             }
 
             // ── Build DataTree outputs ────────────────────────────────────────
@@ -518,45 +241,39 @@ namespace SpatialMorphology
             var voxelTree = new GH_Structure<IGH_GeometricGoo>();
             var shaderTree = new GH_Structure<GH_Colour>();
 
-            // ── Program branches {0..n_programs-1} ────────────────────────────
+            var alphas = result.AllAlphas();
+            int nPrograms = progList.Count;
+
+            // Program branches {0 .. nPrograms-1}
             for (int p = 0; p < nPrograms; p++)
             {
                 var path = new GH_Path(p);
                 var progColor = progList[p].Color;
 
-                foreach (var v in ranked[p])
+                foreach (var v in result.Ranked[p])
                 {
-                    int a = AlphaFor(v);
-                    var shader = Color.FromArgb(a,
+                    var shader = Color.FromArgb(alphas[v],
                         progColor.R, progColor.G, progColor.B);
-                    var key = voxelGrid.FilledKeys[v];
-                    var geom = voxelGrid.KeyToGeometry(key);
 
-                    idxTree.Append(new GH_Integer(v), path);
-                    AppendGeometry(voxelTree, geom, path);
-                    shaderTree.Append(new GH_Colour(shader), path);
+                    AppendVoxel(idxTree, voxelTree, shaderTree,
+                                voxelGrid, v, shader, path);
                 }
             }
 
-            // ── Core branch {n_programs} ──────────────────────────────────────
+            // ── Core branch {nPrograms} ───────────────────────────────────────
             int coreBranchIdx = nPrograms;
             int unassignedBranchIdx = useCore ? nPrograms + 1 : nPrograms;
+
+            var coreSet = new HashSet<int>(coreVoxels);
 
             if (useCore && coreSet.Count > 0)
             {
                 var corePath = new GH_Path(coreBranchIdx);
                 var coreColor = Color.FromArgb(180, 80, 80, 80); // dark grey
 
-                var sortedCore = coreSet.OrderBy(v => v).ToList();
-                foreach (var v in sortedCore)
-                {
-                    var key = voxelGrid.FilledKeys[v];
-                    var geom = voxelGrid.KeyToGeometry(key);
-
-                    idxTree.Append(new GH_Integer(v), corePath);
-                    AppendGeometry(voxelTree, geom, corePath);
-                    shaderTree.Append(new GH_Colour(coreColor), corePath);
-                }
+                foreach (var v in coreSet.OrderBy(v => v))
+                    AppendVoxel(idxTree, voxelTree, shaderTree,
+                                voxelGrid, v, coreColor, corePath);
             }
 
             // ── Unassigned branch ─────────────────────────────────────────────
@@ -567,76 +284,29 @@ namespace SpatialMorphology
 
                 for (int v = 0; v < n; v++)
                 {
-                    if (programIndices[v] != -1) continue; // assigned or core
+                    if (result.ProgramIndices[v] != -1) continue; // assigned or core
                     if (useCore && coreSet.Contains(v)) continue;
 
-                    var key = voxelGrid.FilledKeys[v];
-                    var geom = voxelGrid.KeyToGeometry(key);
-
-                    idxTree.Append(new GH_Integer(v), unPath);
-                    AppendGeometry(voxelTree, geom, unPath);
-                    shaderTree.Append(new GH_Colour(unassColor), unPath);
+                    AppendVoxel(idxTree, voxelTree, shaderTree,
+                                voxelGrid, v, unassColor, unPath);
                 }
             }
 
             // ── Build AnalysisStackData ───────────────────────────────────────
             var analysisStackData = new AnalysisStackData(
-                voxelGrid, labels, channels, raw,
-                progList, programIndices.ToList(),
-                winningScore.ToList(), ranked);
+                voxelGrid,
+                result.Labels,
+                result.Channels,
+                result.Raw,
+                progList,
+                result.ProgramIndices,
+                result.WinningScore,
+                result.Ranked);
 
             // ── Info ──────────────────────────────────────────────────────────
-            var lines = new System.Text.StringBuilder();
-            lines.AppendLine(string.Format(
-                "AnalysisStack v1.2.0 | voxels={0} | channels=[{1}] | programs=[{2}] | method={3}",
-                n,
-                string.Join(", ", labels),
-                string.Join(", ", progList.Select(p => p.Name)),
-                method));
-            lines.AppendLine("");
-            lines.AppendLine("Channels (normalized):");
-
-            foreach (var lbl in labels)
-            {
-                var ch = channels[lbl];
-                var rw = raw[lbl];
-                lines.AppendLine(string.Format(
-                    "  '{0}' | raw=[{1:F3} -> {2:F3}]  norm=[{3:F3} -> {4:F3}]",
-                    lbl, rw.Min(), rw.Max(), ch.Min(), ch.Max()));
-            }
-
-            lines.AppendLine("");
-            lines.AppendLine("Program assignments:");
-
-            for (int p = 0; p < nPrograms; p++)
-            {
-                var prog = progList[p];
-                string lim = prog.VoxelCount >= 0
-                    ? prog.VoxelCount.ToString() : "unlimited";
-                lines.AppendLine(string.Format(
-                    "  [{0}] '{1}' | assigned={2} | voxel_count={3}",
-                    p, prog.Name, ranked[p].Count, lim));
-            }
-
-            if (useCore)
-                lines.AppendLine(string.Format(
-                    "\nCore voxels : {0} (branch {{{1}}})",
-                    coreSet.Count, coreBranchIdx));
-
-            int nUnassigned = Enumerable.Range(0, n)
-                .Count(v => programIndices[v] == -1 &&
-                    !(useCore && coreSet.Contains(v)));
-
-            if (showUnassigned)
-                lines.AppendLine(string.Format(
-                    "Unassigned  : {0} (branch {{{1}}})",
-                    nUnassigned, unassignedBranchIdx));
-            else
-                lines.AppendLine(string.Format(
-                    "Unassigned  : {0} (hidden — show_unassigned=False)",
-                    nUnassigned));
-
-            string info = lines.ToString().TrimEnd();
+            string info = BuildInfo(
+                result, progList, method, useCore, showUnassigned,
+                coreSet, coreBranchIdx, unassignedBranchIdx, n);
 
             // ── Output ────────────────────────────────────────────────────────
             DA.SetData(0, analysisStackData);
@@ -646,8 +316,95 @@ namespace SpatialMorphology
             DA.SetData(4, info);
         }
 
-        // ── Geometry append helper ────────────────────────────────────────────
-        private void AppendGeometry(
+        // ── Unwrap helpers ────────────────────────────────────────────────────
+        // Each accepts a raw GH object, a GH_ObjectWrapper, or a duck-typed
+        // object from a GHPython/C# script component.
+
+        private static SpatialAnalysis? UnwrapAnalysis(object obj)
+        {
+            var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
+            if (inner == null) return null;
+            if (inner is SpatialAnalysis sa) return sa;
+
+            try
+            {
+                dynamic d = inner;
+                string? lbl = d.label?.ToString();
+                var vals = d.values;
+                if (string.IsNullOrWhiteSpace(lbl) || vals == null) return null;
+
+                var vlist = new List<double>();
+                foreach (var v in vals)
+                    vlist.Add(Convert.ToDouble(v));
+                return new SpatialAnalysis(lbl!, vlist);
+            }
+            catch { return null; }
+        }
+
+        private static ProgramDefinition? UnwrapProgram(object obj)
+        {
+            var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
+            if (inner == null) return null;
+            if (inner is ProgramDefinition pd) return pd;
+
+            try
+            {
+                dynamic dyn = inner;
+                string? nm = dyn.name?.ToString();
+                if (string.IsNullOrWhiteSpace(nm)) return null;
+
+                int vc = Convert.ToInt32(dyn.voxel_count);
+                dynamic dc = dyn.color;
+                int r = Convert.ToInt32(dc.R);
+                int g = Convert.ToInt32(dc.G);
+                int b = Convert.ToInt32(dc.B);
+
+                return new ProgramDefinition(nm!, Color.FromArgb(255, r, g, b), vc);
+            }
+            catch { return null; }
+        }
+
+        private static ValueSet? UnwrapValueSet(object obj)
+        {
+            var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
+            if (inner == null) return null;
+            if (inner is ValueSet vs) return vs;
+
+            try
+            {
+                dynamic dyn = inner;
+                string? pnm = dyn.program_name?.ToString();
+                dynamic wts = dyn.weights;
+                if (string.IsNullOrWhiteSpace(pnm) || wts == null) return null;
+
+                var wd = new Dictionary<string, double>();
+                foreach (var kvp in wts)
+                    wd[kvp.Key.ToString()] = Convert.ToDouble(kvp.Value);
+                return new ValueSet(pnm!, wd);
+            }
+            catch { return null; }
+        }
+
+        // ── Output helpers ────────────────────────────────────────────────────
+
+        private static void AppendVoxel(
+            GH_Structure<GH_Integer> idxTree,
+            GH_Structure<IGH_GeometricGoo> voxelTree,
+            GH_Structure<GH_Colour> shaderTree,
+            VoxelGrid voxelGrid,
+            int voxel,
+            Color shader,
+            GH_Path path)
+        {
+            var key = voxelGrid.FilledKeys[voxel];
+            var geom = voxelGrid.KeyToGeometry(key);
+
+            idxTree.Append(new GH_Integer(voxel), path);
+            AppendGeometry(voxelTree, geom, path);
+            shaderTree.Append(new GH_Colour(shader), path);
+        }
+
+        private static void AppendGeometry(
             GH_Structure<IGH_GeometricGoo> tree,
             GeometryBase geom,
             GH_Path path)
@@ -659,8 +416,76 @@ namespace SpatialMorphology
             else if (geom is Mesh mesh)
                 tree.Append(new GH_Mesh(mesh), path);
         }
+
+        private static string BuildInfo(
+            ScoringResult result,
+            List<ProgramDefinition> progList,
+            int method,
+            bool useCore,
+            bool showUnassigned,
+            HashSet<int> coreSet,
+            int coreBranchIdx,
+            int unassignedBranchIdx,
+            int n)
+        {
+            var lines = new System.Text.StringBuilder();
+
+            lines.AppendLine(string.Format(
+                "AnalysisStack v1.2.0 | voxels={0} | channels=[{1}] | programs=[{2}] | method={3}",
+                n,
+                string.Join(", ", result.Labels),
+                string.Join(", ", progList.Select(p => p.Name)),
+                method));
+            lines.AppendLine("");
+            lines.AppendLine("Channels (normalized):");
+
+            foreach (var lbl in result.Labels)
+            {
+                var ch = result.Channels[lbl];
+                var rw = result.Raw[lbl];
+                lines.AppendLine(string.Format(
+                    "  '{0}' | raw=[{1:F3} -> {2:F3}]  norm=[{3:F3} -> {4:F3}]",
+                    lbl, rw.Min(), rw.Max(), ch.Min(), ch.Max()));
+            }
+
+            lines.AppendLine("");
+            lines.AppendLine("Program assignments:");
+
+            for (int p = 0; p < progList.Count; p++)
+            {
+                var prog = progList[p];
+                string lim = prog.VoxelCount >= 0
+                    ? prog.VoxelCount.ToString() : "unlimited";
+                lines.AppendLine(string.Format(
+                    "  [{0}] '{1}' | assigned={2} | voxel_count={3}",
+                    p, prog.Name, result.Ranked[p].Count, lim));
+            }
+
+            if (useCore)
+                lines.AppendLine(string.Format(
+                    "\nCore voxels : {0} (branch {{{1}}})",
+                    coreSet.Count, coreBranchIdx));
+
+            int nUnassigned = Enumerable.Range(0, n)
+                .Count(v => result.ProgramIndices[v] == -1 &&
+                    !(useCore && coreSet.Contains(v)));
+
+            if (showUnassigned)
+                lines.AppendLine(string.Format(
+                    "Unassigned  : {0} (branch {{{1}}})",
+                    nUnassigned, unassignedBranchIdx));
+            else
+                lines.AppendLine(string.Format(
+                    "Unassigned  : {0} (hidden — show_unassigned=False)",
+                    nUnassigned));
+
+            return lines.ToString().TrimEnd();
+        }
     }
+
     // ── AnalysisStackData — downstream data container ─────────────────────────
+    // Stays in the Grasshopper layer: it holds a VoxelGrid, which is
+    // RhinoCommon-dependent and therefore cannot live in Core.
     public class AnalysisStackData
     {
         public VoxelGrid VoxelGrid { get; }
