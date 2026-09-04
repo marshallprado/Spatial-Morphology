@@ -1,0 +1,208 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>SpatialMorphology.Core</name>
+    </assembly>
+    <members>
+        <member name="T:SpatialMorphology.SpatialAnalysis">
+            <summary>
+            Lightweight container pairing a channel label with per-voxel values.
+            Parallel to VoxelGrid.FilledKeys.
+            Normalization is performed by AnalysisStack.
+            </summary>
+        </member>
+        <member name="T:SpatialMorphology.ValueSet">
+            <summary>
+            Stores signed multipliers linking a program to analysis channels.
+            One ValueSet per program — consumed by AnalysisStack for voxel scoring.
+            
+            Multiplier rules:
+              +1.0  = prefer HIGH values in this channel
+              -1.0  = prefer LOW values in this channel
+               0.0  = ignore this channel for this program
+               2.0  = prefer HIGH, twice as important as 1.0
+            </summary>
+        </member>
+        <member name="P:SpatialMorphology.ValueSet.ProgramName">
+            <summary>Name of the program this ValueSet belongs to.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ValueSet.Weights">
+            <summary>
+            Dictionary of channel label -> signed multiplier.
+            Keys match SA component label outputs exactly.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.#ctor(System.String,System.Collections.Generic.Dictionary{System.String,System.Double})">
+            <summary>
+            Create a ValueSet for a named program with a set of channel weights.
+            </summary>
+            <param name="programName">Must match a ProgramDefinition name exactly.</param>
+            <param name="weights">Channel label to signed multiplier mapping.</param>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.#ctor(System.String,System.Collections.Generic.IList{System.String},System.Collections.Generic.IList{System.Double})">
+            <summary>
+            Create a ValueSet from parallel lists of labels and multipliers.
+            </summary>
+            <param name="programName">Must match a ProgramDefinition name exactly.</param>
+            <param name="labels">Channel labels — must match SA component labels.</param>
+            <param name="multipliers">Signed multipliers — parallel to labels.</param>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.GetWeight(System.String)">
+            <summary>
+            Get the multiplier for a channel label.
+            Returns 0.0 if the label is not present (channel ignored).
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.HasChannel(System.String)">
+            <summary>
+            Returns true if this ValueSet has a non-zero weight for the label.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.SetWeight(System.String,System.Double)">
+            <summary>
+            Update or add a weight for a channel label.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.Summary">
+            <summary>
+            Human-readable summary of all channel weights.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ValueSet.ToString">
+            <summary>
+            Returns a compact string representation.
+            </summary>
+        </member>
+        <member name="T:SpatialMorphology.AssignmentMethod">
+            <summary>
+            Assignment strategy used by <see cref="T:SpatialMorphology.VoxelScoringEngine"/>.
+            Integer values match the legacy <c>method</c> input parameter and must not change.
+            </summary>
+        </member>
+        <member name="F:SpatialMorphology.AssignmentMethod.HighestScoreFirst">
+            <summary>0 — every (voxel, program) score sorted descending globally; highest wins first.</summary>
+        </member>
+        <member name="F:SpatialMorphology.AssignmentMethod.RoundRobin">
+            <summary>1 — each program claims its best remaining voxel in turn.</summary>
+        </member>
+        <member name="F:SpatialMorphology.AssignmentMethod.PerProgram">
+            <summary>2 — program 0 fills completely, then program 1, and so on.</summary>
+        </member>
+        <member name="T:SpatialMorphology.ProgramSpec">
+            <summary>Minimal, Rhino-free description of a program for scoring purposes.</summary>
+            <remarks>
+            Deliberately does NOT carry a colour. <c>System.Drawing.Common</c> is
+            Windows-only from .NET 6 onward, so colour stays in the Grasshopper layer.
+            </remarks>
+        </member>
+        <member name="P:SpatialMorphology.ProgramSpec.Name">
+            <summary>Program name. Must match a ValueSet's ProgramName to receive weights.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ProgramSpec.VoxelCount">
+            <summary>Target voxel count, or -1 for unlimited. Only enforced when showAll is false.</summary>
+        </member>
+        <member name="M:SpatialMorphology.ProgramSpec.#ctor(System.String,System.Int32)">
+            <summary>Creates a program specification.</summary>
+        </member>
+        <member name="T:SpatialMorphology.ScoringResult">
+            <summary>Outcome of a scoring + assignment run.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ScoringResult.Labels">
+            <summary>Channel labels in input order.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ScoringResult.Channels">
+            <summary>Per-label values normalised to 0..1.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ScoringResult.Raw">
+            <summary>Per-label values after NaN/Infinity sanitisation, before normalisation.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ScoringResult.ProgramIndices">
+            <summary>
+            Program index per voxel. <c>-1</c> = unassigned, <c>-2</c> = reserved for core.
+            These sentinel values are part of the public contract.
+            </summary>
+        </member>
+        <member name="P:SpatialMorphology.ScoringResult.WinningScore">
+            <summary>Score of the winning program for each voxel; 0.0 where unassigned.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ScoringResult.Ranked">
+            <summary>Voxel indices per program, ordered best score first.</summary>
+        </member>
+        <member name="P:SpatialMorphology.ScoringResult.VoxelCount">
+            <summary>Number of voxels.</summary>
+        </member>
+        <member name="M:SpatialMorphology.ScoringResult.AlphaFor(System.Int32)">
+            <summary>
+            Display alpha for a voxel, 50..255 scaled across the global assigned-score
+            range, or 40 for unassigned/core voxels.
+            </summary>
+        </member>
+        <member name="M:SpatialMorphology.ScoringResult.AllAlphas">
+            <summary>
+            Alpha values for every voxel. Preferred over repeated <see cref="M:SpatialMorphology.ScoringResult.AlphaFor(System.Int32)"/>
+            calls — computes the global range once instead of per voxel.
+            </summary>
+        </member>
+        <member name="T:SpatialMorphology.ScoringInputException">
+            <summary>Raised when the caller supplies inconsistent scoring input.</summary>
+        </member>
+        <member name="M:SpatialMorphology.ScoringInputException.#ctor(System.String)">
+            <summary>Creates the exception with a caller-facing message.</summary>
+        </member>
+        <member name="T:SpatialMorphology.VoxelScoringEngine">
+            <summary>
+            Pure scoring and assignment logic extracted from AnalysisStackComponent.
+            No Rhino, no Grasshopper, no System.Drawing — fully unit-testable.
+            </summary>
+            <remarks>
+            <para>
+            This is a faithful extraction, not a redesign. Normalisation, multiplier
+            semantics, all three assignment methods, ranking order and the alpha ramp
+            reproduce the original component exactly, so existing definitions produce
+            identical results.
+            </para>
+            <para>
+            <b>Missing-channel default.</b> A channel absent from a program's ValueSet is
+            treated as multiplier <c>1.0</c> (counts fully, prefer high) — matching the
+            original component. Note that <c>ValueSet.GetWeight</c> returns <c>0.0</c>
+            (ignore) for the same case. The component never called that accessor, so the
+            two rules never met. The component's behaviour is authoritative here because
+            it is what saved .gh files already produce. Do not "fix" this by routing
+            through GetWeight without a deliberate migration.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:SpatialMorphology.VoxelScoringEngine.Run(System.Int32,System.Collections.Generic.IList{SpatialMorphology.SpatialAnalysis},System.Collections.Generic.IList{SpatialMorphology.ProgramSpec},System.Collections.Generic.IList{SpatialMorphology.ValueSet},System.Boolean,SpatialMorphology.AssignmentMethod,System.Collections.Generic.IEnumerable{System.Int32})">
+            <summary>
+            Scores every voxel for every program and assigns each voxel to one program.
+            </summary>
+            <param name="voxelCount">Number of voxels. Every channel must have this many values.</param>
+            <param name="analyses">Analysis channels. Labels must be unique.</param>
+            <param name="programs">Programs, in output branch order.</param>
+            <param name="valueSets">Optional per-program weights, matched by name. May be null.</param>
+            <param name="showAll">
+            True = ignore each program's VoxelCount cap.
+            False = stop assigning to a program once its cap is reached.
+            </param>
+            <param name="method">Assignment strategy.</param>
+            <param name="coreVoxels">
+            Optional voxel indices reserved for the core. Marked <c>-2</c> and excluded
+            from program assignment. May be null.
+            </param>
+            <exception cref="T:SpatialMorphology.ScoringInputException">
+            Duplicate channel label, channel length mismatch, or no channels/programs.
+            </exception>
+        </member>
+        <member name="M:SpatialMorphology.VoxelScoringEngine.IsUnusable(System.Double)">
+            <summary>
+            Matches the original sanitisation: NaN and +Infinity become 0.0.
+            </summary>
+            <remarks>
+            NegativeInfinity is deliberately NOT filtered, reproducing the original
+            behaviour. It would propagate into normalisation and produce NaN scores.
+            Left as-is so this extraction changes no results; fix it as its own
+            commit with a test, not silently here.
+            </remarks>
+        </member>
+    </members>
+</doc>
