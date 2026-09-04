@@ -66,5 +66,12 @@
             Returns a compact string representation.
             </summary>
         </member>
+        <member name="T:SpatialMorphology.SpatialAnalysis">
+            <summary>
+            Lightweight container pairing a channel label with per-voxel values.
+            Parallel to VoxelGrid.FilledKeys.
+            Normalization is performed by AnalysisStack.
+            </summary>
+        </member>
     </members>
 </doc>

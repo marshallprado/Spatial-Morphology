@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SpatialMorphology.Core")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e5df406fcef364360f2487f8155443262733b999")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+24e21e69d3a50a7f663144bff01e3da99a9c358a")]
 [assembly: System.Reflection.AssemblyProductAttribute("SpatialMorphology.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SpatialMorphology.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
