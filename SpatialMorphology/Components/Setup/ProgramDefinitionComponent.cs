@@ -15,7 +15,7 @@ namespace SpatialMorphology
                 "ProgDef",
                 "Defines a programmatic space in the voxel model.",
                 "Spatial Morphology",
-                "Setup")
+                "1 | Setup")
         { }
 
         // ── GUID ──────────────────────────────────────────────────────────────

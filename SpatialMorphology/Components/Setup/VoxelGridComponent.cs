@@ -19,7 +19,7 @@ namespace SpatialMorphology
                 "Voxelizes a Brep or Mesh into a 3D grid aligned to a construction plane.\n\n" +
                 "Version 2.0.0",
                 "Spatial Morphology",
-                "Setup")
+                "1 | Setup")
         { }
 
         // ── GUID ──────────────────────────────────────────────────────────────

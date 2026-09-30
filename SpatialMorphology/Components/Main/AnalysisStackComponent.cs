@@ -37,7 +37,7 @@ namespace SpatialMorphology
                 "  If False, unassigned voxels are excluded from all outputs.\n\n" +
                 "Version 1.2.0",
                 "Spatial Morphology",
-                "Main")
+                "3 | Main")
         { }
 
         // ── GUID — DO NOT CHANGE ──────────────────────────────────────────────

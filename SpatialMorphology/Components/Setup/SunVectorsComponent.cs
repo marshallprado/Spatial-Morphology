@@ -35,7 +35,7 @@ namespace SpatialMorphology
                 "  4 = Custom      (use start_month and end_month)\n\n" +
                 "Version 1.1.0",
                 "Spatial Morphology",
-                "Setup")
+                "1 | Setup")
         { }
 
         // ── GUID ──────────────────────────────────────────────────────────────
@@ -101,9 +101,9 @@ namespace SpatialMorphology
                 "2 = every 2 hours (faster).\n" +
                 "Default: 1.",
                 GH_ParamAccess.item, 1);
-            
 
-            pManager[8].Optional = true;
+
+            pManager[0].Optional = true;   // was pManager[8]
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -136,16 +136,16 @@ namespace SpatialMorphology
             int timeStep = 1;
             object voxelGridObj = null;
 
-            DA.GetData(8, ref voxelGridObj); 
-            DA.GetData(0, ref latitude);
-            DA.GetData(1, ref longitude);
-            DA.GetData(2, ref timeZone);
-            DA.GetData(3, ref north);
-            DA.GetData(4, ref analysisPeriod);
-            DA.GetData(5, ref startMonth);
-            DA.GetData(6, ref endMonth);
-            DA.GetData(7, ref timeStep);
-            
+            DA.GetData(0, ref voxelGridObj);
+            DA.GetData(1, ref latitude);
+            DA.GetData(2, ref longitude);
+            DA.GetData(3, ref timeZone);
+            DA.GetData(4, ref north);
+            DA.GetData(5, ref analysisPeriod);
+            DA.GetData(6, ref startMonth);
+            DA.GetData(7, ref endMonth);
+            DA.GetData(8, ref timeStep);
+
 
             // ── Validate ──────────────────────────────────────────────────────
             latitude = Math.Max(-90.0, Math.Min(90.0, latitude));

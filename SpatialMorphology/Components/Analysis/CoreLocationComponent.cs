@@ -1,5 +1,5 @@
 ﻿// -*- coding: utf-8 -*-
-// Version 3.1.0
+// Version 4.0.0
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -11,32 +11,96 @@ using Rhino.Geometry;
 
 namespace SpatialMorphology
 {
+    /// <summary>
+    /// Places vertical circulation cores in the voxel grid, either from
+    /// supplied curves or by dynamic-programming search, and scores every
+    /// voxel by how close it is to the nearest core.
+    /// </summary>
+    /// <remarks>
+    /// RENAMED in 4.0.0 — display name was "CoreLocation", now "Core Location".
+    /// The class name was already prefix-free. The ComponentGuid and the
+    /// default label "core" are both UNCHANGED, so saved definitions keep
+    /// resolving and no ValueSet matrix needs re-confirming.
+    ///
+    /// INVERT CONVENTION — READ THIS.
+    /// This component's default is the OPPOSITE of every other analysis
+    /// component in the set, and that is deliberate.
+    ///
+    ///   Everywhere else   invert = false gives the raw measurement.
+    ///                     invert = true reverses it.
+    ///
+    ///   Here              invert = false gives NEAR-CORE = HIGH, because the
+    ///                     raw distance is flipped internally by
+    ///                     (maxDist - d) before it leaves the component.
+    ///                     invert = true undoes that flip and gives plain
+    ///                     distance-from-core, so FAR-CORE = HIGH.
+    ///
+    /// The reason is that "closer to the core scores better" is the reading
+    /// almost everyone wants by default — a channel that rewards being far
+    /// from circulation is the unusual case, not the common one.
+    ///
+    /// This asymmetry was kept ON PURPOSE rather than normalised. Flipping the
+    /// default to match the other components would not error, would not warn,
+    /// and would not stop any saved definition from solving — it would simply
+    /// make every multiplier in every existing ValueSet matrix point the wrong
+    /// way, silently. A silent semantic inversion in saved files is a worse
+    /// outcome than an inconsistent default that is documented.
+    ///
+    /// So: invert = true here means "I want distance FROM the core", not
+    /// "reverse the raw measurement".
+    ///
+    /// Ribbon placement is secondary — voxel-internal. Cores are derived from
+    /// the grid's own geometry and, in generative mode, from analysis channels
+    /// that already exist. No external context geometry is read. The optional
+    /// core_curves input in manual mode is a control input, not site context.
+    /// </remarks>
     public class CoreLocationComponent : SAComponentBase
     {
         // ── Constructor ───────────────────────────────────────────────────────
         public CoreLocationComponent()
             : base(
-                "CoreLocation",
+                "Core Location",
                 "Core",
-                "Determines core locations in the voxel grid.\n\n" +
+                "Places vertical circulation cores and scores every voxel by\n" +
+                "its closeness to the nearest one.\n\n" +
                 "Mode 0 — Manual:\n" +
-                "  Input one or more curves defining core paths.\n" +
-                "  Each curve defines one independent core.\n\n" +
+                "  Supply one or more curves. Each curve defines one core.\n" +
+                "  Voxels within 'radius' of a curve become core voxels.\n\n" +
                 "Mode 1 — Generative:\n" +
-                "  Uses existing SA analysis channels as input scores.\n" +
-                "  Dynamic programming finds optimal vertical core paths\n" +
-                "  that minimize total travel distance for all voxels.\n" +
-                "  Coverage uses BFS floor travel distance — disjointed\n" +
-                "  floor islands always receive their own core.\n" +
-                "  Additional cores added until all voxels within max_distance.\n\n" +
-                "Output analysis = inverted distance to nearest core.\n" +
-                "Closer to core = higher value.\n\n" +
-                "Version 3.1.0",
+                "  Dynamic programming searches for vertical core paths that\n" +
+                "  minimise total travel distance. Coverage is measured by BFS\n" +
+                "  along each floor, so a disconnected floor island always\n" +
+                "  gets its own core rather than being served across a gap.\n" +
+                "  Cores are added until every voxel is within max_distance,\n" +
+                "  or until the internal core limit is reached.\n\n" +
+                "  Connect analysis channels to bias WHERE cores want to sit.\n" +
+                "  Higher channel values attract cores. With nothing connected\n" +
+                "  the search uses travel distance alone.\n\n" +
+                "VALUE CONVENTION — this component is inverted by default:\n" +
+                "  invert = False (default): near core = HIGH, far = LOW.\n" +
+                "    This is the usual reading — proximity to circulation is\n" +
+                "    desirable, so it scores well.\n" +
+                "  invert = True: near core = LOW, far = HIGH.\n" +
+                "    This is plain distance-from-core. Use it when core\n" +
+                "    adjacency is undesirable — maximising quiet leasable area\n" +
+                "    away from lift lobbies and stair pressure.\n\n" +
+                "  Note this is the reverse of components like Proximity and\n" +
+                "  Surface Distance, where invert = False is the unmodified\n" +
+                "  measurement. Here the default is already flipped.\n\n" +
+                "The geometry outputs — core_indices, is_core, centerlines and\n" +
+                "footprints — are never affected by invert. Only the scalar\n" +
+                "value channel, its gradient and the voxel preview reverse.\n\n" +
+                "Version 4.0.0",
                 "Spatial Morphology",
-                "Analysis")
+                "2 | Analysis")
         { }
 
-        // ── GUID ──────────────────────────────────────────────────────────────
+        // ── Ribbon placement ──────────────────────────────────────────────────
+        // Voxel-internal — derives cores from the grid and from existing
+        // channels. No external site geometry is consumed.
+        public override GH_Exposure Exposure => GH_Exposure.secondary;
+
+        // ── GUID — DO NOT CHANGE ──────────────────────────────────────────────
         public override Guid ComponentGuid =>
             new Guid("B8C9D0E1-F2A3-4567-BCDE-012345678916");
 
@@ -52,6 +116,18 @@ namespace SpatialMorphology
             }
         }
 
+        // ── Mode names ────────────────────────────────────────────────────────
+        private static readonly string[] MODE_NAMES =
+        {
+            "Manual",
+            "Generative (DP + BFS)"
+        };
+
+        // ── Search limit ──────────────────────────────────────────────────────
+        // Hard ceiling on generative core count. Without it, a grid that can
+        // never satisfy max_distance would loop until it ran out of voxels.
+        private const int MAX_CORES = 20;
+
         // ── Parameters ────────────────────────────────────────────────────────
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
@@ -59,9 +135,9 @@ namespace SpatialMorphology
                 "VoxelGrid object from the VoxelGrid component.",
                 GH_ParamAccess.item);
             pManager.AddIntegerParameter("mode", "M",
-                "Analysis mode:\n" +
-                "  0 = Manual      (use core_curves input)\n" +
-                "  1 = Generative  (DP-based optimal core placement)",
+                "Placement mode:\n" +
+                "  0 = Manual      (use core_curves)\n" +
+                "  1 = Generative  (DP search for optimal core paths)",
                 GH_ParamAccess.item, 0);
             pManager.AddCurveParameter("core_curves", "CC",
                 "Manual mode only.\n" +
@@ -70,23 +146,35 @@ namespace SpatialMorphology
                 GH_ParamAccess.list);
             pManager.AddGenericParameter("analysis", "A",
                 "Generative mode only. Optional.\n" +
-                "List of SpatialAnalysis objects to use as scoring channels.\n" +
-                "Higher channel values = better core candidate positions.\n" +
-                "If not connected, travel distance alone is used for scoring.",
+                "SpatialAnalysis channels used to bias core placement.\n" +
+                "Higher values attract cores. Each channel is normalised\n" +
+                "independently before use, so channels on different scales\n" +
+                "contribute evenly.\n" +
+                "With nothing connected, travel distance alone is used.",
                 GH_ParamAccess.list);
             pManager.AddNumberParameter("radius", "R",
-                "Distance from core path that defines core voxels.\n" +
+                "Distance from the core path that counts as core.\n" +
                 "In model units. Default: 10.0.",
                 GH_ParamAccess.item, 10.0);
             pManager.AddNumberParameter("max_distance", "MD",
-                "Maximum allowed BFS floor travel distance from any voxel\n" +
-                "to its nearest core. Additional cores added automatically\n" +
-                "if any voxel exceeds this. Default: 100.0 (feet).",
+                "Maximum BFS floor travel distance from any voxel to its\n" +
+                "nearest core. Cores are added until this is satisfied.\n" +
+                "Measured along connected floor voxels, not straight line.\n" +
+                "Default: 100.0.",
                 GH_ParamAccess.item, 100.0);
             pManager.AddIntegerParameter("min_island_size", "MI",
-                "Minimum connected voxels in a floor island\n" +
-                "to receive a core. Default: 4.",
+                "Minimum connected voxels in a floor island for it to\n" +
+                "warrant its own core. Default: 4.",
                 GH_ParamAccess.item, 4);
+            pManager.AddBooleanParameter("invert", "I",
+                "If True, reverse the value channel so voxels NEAR a core\n" +
+                "score LOW and voxels FAR from a core score HIGH.\n\n" +
+                "Default false already reads near-core = high, because the\n" +
+                "distance is flipped internally. Setting this True therefore\n" +
+                "gives plain distance-from-core.\n\n" +
+                "Use when core adjacency is undesirable.\n" +
+                "Default: false.",
+                GH_ParamAccess.item, false);
             pManager.AddTextParameter("label", "L",
                 "Channel name used by AnalysisStack. Default: 'core'.",
                 GH_ParamAccess.item, "core");
@@ -99,32 +187,33 @@ namespace SpatialMorphology
         {
             pManager.AddGenericParameter("analysis", "A",
                 "SpatialAnalysis object. Wire into AnalysisStack.\n" +
-                "Value = inverted distance to nearest core.\n" +
-                "Closer to core = higher value.",
+                "invert=False: near core = high value.\n" +
+                "invert=True:  near core = low value.",
                 GH_ParamAccess.item);
             pManager.AddNumberParameter("values", "V",
-                "Per-voxel inverted distance to nearest core.",
+                "Per-voxel core proximity score, reversed if invert is true.",
                 GH_ParamAccess.list);
             pManager.AddPointParameter("centers", "C",
                 "Voxel centres for preview.",
                 GH_ParamAccess.list);
             pManager.AddColourParameter("gradient", "G",
-                "Per-voxel gradient color from low (red) to high (blue).",
+                "Per-voxel gradient color from low (red) to high (blue),\n" +
+                "based on the output values.",
                 GH_ParamAccess.list);
             pManager.AddIntegerParameter("core_indices", "CI",
-                "Voxel indices designated as core voxels.",
+                "Indices of voxels designated as core. Never inverted.",
                 GH_ParamAccess.list);
             pManager.AddBooleanParameter("is_core", "IC",
-                "Per-voxel boolean. True = core voxel.\n" +
-                "Parallel to voxel_grid.filled_keys.",
+                "Per-voxel boolean, True = core voxel.\n" +
+                "Parallel to voxel_grid.FilledKeys. Never inverted.",
                 GH_ParamAccess.list);
             pManager.AddCurveParameter("core_centerlines", "CL",
-                "One continuous polyline per core from lowest to highest floor.",
+                "One polyline per core, lowest floor to highest.",
                 GH_ParamAccess.list);
             pManager.AddCurveParameter("core_footprints", "CF",
-                "DataTree of floor rectangle outlines per core.\n" +
-                "Branch {c} = rectangles for core c, one per floor.\n" +
-                "Loft branches independently to create core geometry.",
+                "DataTree of floor rectangles per core.\n" +
+                "Branch {c} holds one rectangle per floor for core c.\n" +
+                "Loft each branch independently to build core geometry.",
                 GH_ParamAccess.tree);
             pManager.AddTextParameter("info", "I",
                 "Summary.",
@@ -134,7 +223,6 @@ namespace SpatialMorphology
         // ── Solve ─────────────────────────────────────────────────────────────
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            // ── Collect inputs ────────────────────────────────────────────────
             object voxelGridObj = null;
             int mode = 0;
             var inputCurves = new List<Curve>();
@@ -142,6 +230,7 @@ namespace SpatialMorphology
             double radius = 10.0;
             double maxDistance = 100.0;
             int minIslandSize = 4;
+            bool invert = false;
             string label = "core";
 
             if (!DA.GetData(0, ref voxelGridObj)) return;
@@ -151,9 +240,9 @@ namespace SpatialMorphology
             DA.GetData(4, ref radius);
             DA.GetData(5, ref maxDistance);
             DA.GetData(6, ref minIslandSize);
-            DA.GetData(7, ref label);
+            DA.GetData(7, ref invert);
+            DA.GetData(8, ref label);
 
-            // ── Unwrap VoxelGrid ──────────────────────────────────────────────
             var voxelGrid = UnwrapVoxelGrid(voxelGridObj);
             if (voxelGrid == null)
             {
@@ -162,9 +251,9 @@ namespace SpatialMorphology
                 return;
             }
 
-            // ── Validate ──────────────────────────────────────────────────────
             string resolvedLabel = string.IsNullOrWhiteSpace(label)
                 ? "core" : label.Trim();
+
             mode = Math.Max(0, Math.Min(1, mode));
             radius = Math.Max(0.01, radius);
             maxDistance = Math.Max(1.0, maxDistance);
@@ -174,17 +263,23 @@ namespace SpatialMorphology
             int n = orderedKeys.Count;
             double vs = voxelGrid.VoxelSize;
 
-            // ── Precompute world-space centers ────────────────────────────────
-            var centers = orderedKeys
-                .Select(key => voxelGrid.KeyToCenter(key))
-                .ToList();
+            if (n == 0)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
+                    "VoxelGrid contains no filled voxels.");
+                return;
+            }
 
-            // ── Build key-to-index map ────────────────────────────────────────
+            // ── Precompute centres and lookup ─────────────────────────────────
+            var centers = new List<Point3d>(n);
+            foreach (var key in orderedKeys)
+                centers.Add(voxelGrid.KeyToCenter(key));
+
             var keyToIndex = new Dictionary<(int, int, int), int>(n);
             for (int i = 0; i < n; i++)
                 keyToIndex[orderedKeys[i]] = i;
 
-            // ── Group voxels by floor ─────────────────────────────────────────
+            // ── Group voxels by floor (grid Z layer) ──────────────────────────
             var voxelsByFloor = new SortedDictionary<int, List<int>>();
             for (int i = 0; i < n; i++)
             {
@@ -194,42 +289,11 @@ namespace SpatialMorphology
                 voxelsByFloor[iz].Add(i);
             }
 
-            // ── Unwrap optional SA analysis channels ──────────────────────────
-            var saChannels = new List<List<double>>();
-            foreach (var obj in analysisObjs)
-            {
-                var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
-                List<double> vals = null;
+            // ── Unwrap and normalise optional scoring channels ────────────────
+            var saChannels = UnwrapChannels(analysisObjs, n);
 
-                if (inner is SpatialAnalysis sa && sa.Values.Count == n)
-                    vals = sa.Values.ToList();
-                else if (inner != null)
-                {
-                    try
-                    {
-                        dynamic dyn = inner;
-                        var dvls = new List<double>();
-                        foreach (var v in dyn.values)
-                            dvls.Add(Convert.ToDouble(v));
-                        if (dvls.Count == n) vals = dvls;
-                    }
-                    catch { }
-                }
-
-                if (vals != null)
-                {
-                    double lo = vals.Min();
-                    double hi = vals.Max();
-                    double rng = hi - lo;
-                    saChannels.Add(vals
-                        .Select(v => rng > 1e-12 ? (v - lo) / rng : 0.0)
-                        .ToList());
-                }
-            }
-
-            // ── Core data ─────────────────────────────────────────────────────
-            var coreFloorData = new List<List<(int floor,
-                Point3d centroid, List<int> indices)>>();
+            var coreFloorData =
+                new List<List<(int floor, Point3d centroid, List<int> indices)>>();
             var coreVoxelSet = new HashSet<int>();
 
             // ── Mode 0 — Manual ───────────────────────────────────────────────
@@ -242,351 +306,541 @@ namespace SpatialMorphology
                     return;
                 }
 
-                for (int c = 0; c < inputCurves.Count; c++)
-                {
-                    var curve = inputCurves[c];
-                    if (curve == null) continue;
+                BuildManualCores(
+                    inputCurves, centers, orderedKeys, radius,
+                    coreVoxelSet, coreFloorData);
 
-                    var floorGroups = new SortedDictionary<int, List<int>>();
-
-                    for (int i = 0; i < n; i++)
-                    {
-                        double t;
-                        curve.ClosestPoint(centers[i], out t);
-                        double dist = centers[i].DistanceTo(curve.PointAt(t));
-
-                        if (dist <= radius)
-                        {
-                            coreVoxelSet.Add(i);
-                            int iz = orderedKeys[i].Item3;
-                            if (!floorGroups.ContainsKey(iz))
-                                floorGroups[iz] = new List<int>();
-                            floorGroups[iz].Add(i);
-                        }
-                    }
-
-                    var thisCore = new List<(int, Point3d, List<int>)>();
-                    foreach (var kvp in floorGroups)
-                    {
-                        var cent = VoxelCentroid(kvp.Value, centers);
-                        thisCore.Add((kvp.Key, cent, kvp.Value));
-                    }
-                    if (thisCore.Count > 0)
-                        coreFloorData.Add(thisCore);
-                }
+                if (coreVoxelSet.Count == 0)
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
+                        "No voxels fell within 'radius' of any curve.\n" +
+                        "Check that the curves pass through the voxel grid and\n" +
+                        "that radius is large enough for the voxel size.");
             }
-            // ── Mode 1 — Generative (DP + BFS coverage) ──────────────────────
+            // ── Mode 1 — Generative ───────────────────────────────────────────
             else
             {
-                // ── Step 1: Compute per-voxel raw score ───────────────────────
-                // Score = normalized avg travel dist - SA bonus
-                // Lower = better core candidate
-                var rawScore = new double[n];
+                int nUncovered = BuildGenerativeCores(
+                    n, vs, radius, maxDistance, minIslandSize,
+                    centers, orderedKeys, keyToIndex, voxelsByFloor,
+                    saChannels, coreVoxelSet, coreFloorData);
 
-                foreach (var kvp in voxelsByFloor)
-                {
-                    var fv = kvp.Value;
-
-                    // Sample up to 50 voxels per floor for efficiency
-                    var sample = fv.Count <= 50
-                        ? fv
-                        : fv.Take(50).ToList();
-
-                    foreach (var idx in fv)
-                    {
-                        double avgDist = sample.Count > 0
-                            ? sample.Average(s =>
-                                centers[idx].DistanceTo(centers[s]))
-                            : 0.0;
-
-                        double saBonus = saChannels.Count > 0
-                            ? saChannels.Average(ch => ch[idx])
-                            : 0.0;
-
-                        rawScore[idx] = (avgDist / maxDistance) - saBonus;
-                    }
-                }
-
-                // ── Step 2: Vertical blending ─────────────────────────────────
-                // blended = 0.60*current + 0.25*below + 0.15*above
-                var blendedScore = new double[n];
-                var floorList = voxelsByFloor.Keys.ToList();
-
-                for (int fi = 0; fi < floorList.Count; fi++)
-                {
-                    var fv = voxelsByFloor[floorList[fi]];
-
-                    List<int> belowVoxels = fi > 0
-                        ? voxelsByFloor[floorList[fi - 1]]
-                        : new List<int>();
-                    List<int> aboveVoxels = fi < floorList.Count - 1
-                        ? voxelsByFloor[floorList[fi + 1]]
-                        : new List<int>();
-
-                    foreach (var idx in fv)
-                    {
-                        int ix = orderedKeys[idx].Item1;
-                        int iy = orderedKeys[idx].Item2;
-
-                        double belowScore = GetNeighborScore(
-                            ix, iy, belowVoxels, orderedKeys, rawScore);
-                        double aboveScore = GetNeighborScore(
-                            ix, iy, aboveVoxels, orderedKeys, rawScore);
-
-                        blendedScore[idx] = 0.60 * rawScore[idx]
-                                          + 0.25 * belowScore
-                                          + 0.15 * aboveScore;
-                    }
-                }
-
-                // ── Step 3: Iterative DP core placement ───────────────────────
-                // Shift penalty auto-scaled: vertical always wins unless
-                // shift saves > maxDistance/10 in travel
-                double shiftPenalty = maxDistance / 10.0 / vs;
-                var uncovered = new HashSet<int>(Enumerable.Range(0, n));
-                int maxCores = 20;
-                int coreIter = 0;
-
-                while (uncovered.Count > 0 && coreIter < maxCores)
-                {
-                    coreIter++;
-
-                    // Find which floors have uncovered voxels
-                    var floorsWithUncovered = new HashSet<int>(
-                        uncovered.Select(idx => orderedKeys[idx].Item3));
-
-                    if (floorsWithUncovered.Count == 0) break;
-
-                    // Use ALL floor voxels for path connectivity
-                    // DP can traverse covered voxels to reach uncovered ones
-                    var coreFloors = voxelsByFloor.Keys
-                        .Where(f => floorsWithUncovered.Contains(f) ||
-                            voxelsByFloor[f].Any(idx => !uncovered.Contains(idx)))
-                        .OrderBy(f => f)
-                        .ToList();
-
-                    if (coreFloors.Count == 0) break;
-
-                    // ── DP ────────────────────────────────────────────────────
-                    var dp = new Dictionary<int, double>();
-                    var parent = new Dictionary<int, int>();
-
-                    // Seed bottom floor — prefer uncovered voxels
-                    int botFloor = coreFloors.First(
-                        f => floorsWithUncovered.Contains(f));
-
-                    foreach (var idx in voxelsByFloor[botFloor])
-                    {
-                        // Score 0 for covered voxels — they are just path nodes
-                        double score = uncovered.Contains(idx)
-                            ? blendedScore[idx]
-                            : 0.0;
-                        dp[idx] = score;
-                        parent[idx] = -1;
-                    }
-
-                    for (int fi = 1; fi < coreFloors.Count; fi++)
-                    {
-                        int curFloor = coreFloors[fi];
-                        int prevFloor = coreFloors[fi - 1];
-
-                        if (!voxelsByFloor.ContainsKey(prevFloor)) continue;
-
-                        foreach (var curIdx in voxelsByFloor[curFloor])
-                        {
-                            int cix = orderedKeys[curIdx].Item1;
-                            int ciy = orderedKeys[curIdx].Item2;
-
-                            double bestCost = double.MaxValue;
-                            int bestPrev = -1;
-
-                            foreach (var prevIdx in voxelsByFloor[prevFloor])
-                            {
-                                if (!dp.ContainsKey(prevIdx)) continue;
-
-                                int pix = orderedKeys[prevIdx].Item1;
-                                int piy = orderedKeys[prevIdx].Item2;
-
-                                int dix = Math.Abs(cix - pix);
-                                int diy = Math.Abs(ciy - piy);
-
-                                // Max 1 voxel horizontal shift
-                                if (dix > 1 || diy > 1) continue;
-
-                                double shift = Math.Sqrt(dix * dix + diy * diy);
-                                double score = uncovered.Contains(curIdx)
-                                    ? blendedScore[curIdx]
-                                    : 0.0;
-                                double cost = dp[prevIdx]
-                                             + score
-                                             + shift * shiftPenalty;
-
-                                if (cost < bestCost)
-                                {
-                                    bestCost = cost;
-                                    bestPrev = prevIdx;
-                                }
-                            }
-
-                            if (bestPrev >= 0)
-                            {
-                                dp[curIdx] = bestCost;
-                                parent[curIdx] = bestPrev;
-                            }
-                        }
-                    }
-
-                    // ── Trace back best path ───────────────────────────────────
-                    // Find best endpoint on topmost floor with uncovered voxels
-                    int topFloor = coreFloors.Last(
-                        f => floorsWithUncovered.Contains(f));
-
-                    int bestEnd = -1;
-                    double bestDP = double.MaxValue;
-
-                    foreach (var idx in voxelsByFloor[topFloor])
-                    {
-                        if (!dp.ContainsKey(idx)) continue;
-                        if (!uncovered.Contains(idx)) continue;
-                        if (dp[idx] < bestDP)
-                        {
-                            bestDP = dp[idx];
-                            bestEnd = idx;
-                        }
-                    }
-
-                    // Fallback — take any reachable voxel on top floor
-                    if (bestEnd < 0)
-                    {
-                        foreach (var idx in voxelsByFloor[topFloor])
-                        {
-                            if (dp.ContainsKey(idx) && dp[idx] < bestDP)
-                            {
-                                bestDP = dp[idx];
-                                bestEnd = idx;
-                            }
-                        }
-                    }
-
-                    // Last resort — best uncovered on bottom floor
-                    if (bestEnd < 0)
-                    {
-                        bestEnd = voxelsByFloor[botFloor]
-                            .Where(idx => uncovered.Contains(idx))
-                            .OrderBy(idx => blendedScore[idx])
-                            .FirstOrDefault();
-                    }
-
-                    if (bestEnd < 0) break;
-
-                    // Trace path bottom to top
-                    var pathIndices = new List<int>();
-                    int cur = bestEnd;
-                    int safety = n + 1;
-
-                    while (cur >= 0 && safety-- > 0)
-                    {
-                        pathIndices.Add(cur);
-                        cur = parent.ContainsKey(cur) ? parent[cur] : -1;
-                    }
-
-                    pathIndices.Reverse();
-
-                    // ── Expand path to core voxels within radius ───────────────
-                    var thisFloorData = new List<(int, Point3d, List<int>)>();
-                    var pathByFloor = new SortedDictionary<int, int>();
-
-                    foreach (var idx in pathIndices)
-                    {
-                        int iz = orderedKeys[idx].Item3;
-                        if (!pathByFloor.ContainsKey(iz))
-                            pathByFloor[iz] = idx;
-                    }
-
-                    foreach (var kvp in pathByFloor)
-                    {
-                        int floor = kvp.Key;
-                        int seedIdx = kvp.Value;
-                        var seedPt = centers[seedIdx];
-
-                        var floorCore = voxelsByFloor.ContainsKey(floor)
-                            ? voxelsByFloor[floor]
-                                .Where(idx =>
-                                    centers[idx].DistanceTo(seedPt) <= radius)
-                                .ToList()
-                            : new List<int> { seedIdx };
-
-                        if (floorCore.Count == 0)
-                            floorCore.Add(seedIdx);
-
-                        foreach (var idx in floorCore)
-                            coreVoxelSet.Add(idx);
-
-                        thisFloorData.Add((floor,
-                            VoxelCentroid(floorCore, centers),
-                            floorCore));
-                    }
-
-                    if (thisFloorData.Count > 0)
-                        coreFloorData.Add(thisFloorData);
-
-                    // ── Update coverage using BFS floor travel distance ────────
-                    var coverage = ComputeFloorBFSCoverage(
-                        coreVoxelSet, voxelsByFloor, keyToIndex,
-                        orderedKeys, centers, maxDistance);
-
-                    uncovered.ExceptWith(coverage);
-                    uncovered.ExceptWith(coreVoxelSet);
-                }
-
-                if (uncovered.Count > 0)
+                if (nUncovered > 0)
                     AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
                         string.Format(
-                            "{0} voxels remain beyond max_distance={1:F1}.\n" +
-                            "Try reducing max_distance or increasing radius.",
-                            uncovered.Count, maxDistance));
+                            "{0} voxels remain beyond max_distance = {1:F1}.\n" +
+                            "Reduce max_distance, increase radius, or accept\n" +
+                            "that isolated floor islands cannot all be served.",
+                            nUncovered, maxDistance));
             }
 
             // ── Build centerlines and footprints ──────────────────────────────
             var coreCenterlines = new List<Curve>();
             var coreFootprintTree = new GH_Structure<GH_Curve>();
 
+            BuildCoreGeometry(
+                coreFloorData, centers, vs,
+                coreCenterlines, coreFootprintTree);
+
+            // ── Distance to nearest core voxel ────────────────────────────────
+            var coreCenterPts = new List<Point3d>(coreVoxelSet.Count);
+            foreach (var idx in coreVoxelSet)
+                coreCenterPts.Add(centers[idx]);
+
+            var rawDistance = new List<double>(n);
+            var isCore = new List<bool>(n);
+            double maxDist = 0.0;
+
+            for (int i = 0; i < n; i++)
+            {
+                if (coreVoxelSet.Contains(i))
+                {
+                    rawDistance.Add(0.0);
+                    isCore.Add(true);
+                    continue;
+                }
+
+                isCore.Add(false);
+
+                if (coreCenterPts.Count == 0)
+                {
+                    rawDistance.Add(0.0);
+                    continue;
+                }
+
+                double minDist = double.MaxValue;
+                foreach (var cp in coreCenterPts)
+                {
+                    double d = centers[i].DistanceTo(cp);
+                    if (d < minDist) minDist = d;
+                }
+
+                rawDistance.Add(minDist);
+                if (minDist > maxDist) maxDist = minDist;
+            }
+
+            // ── Default orientation: near core = HIGH ─────────────────────────
+            // This flip is what makes this component's invert convention the
+            // reverse of the others. See the class remarks.
+            var nearCoreHigh = new List<double>(n);
+            foreach (var d in rawDistance)
+                nearCoreHigh.Add(maxDist - d);
+
+            // invert = true returns plain distance-from-core.
+            var outputValues = invert ? InvertValues(nearCoreHigh) : nearCoreHigh;
+
+            var analysis = new SpatialAnalysis(resolvedLabel, outputValues);
+            var gradient = ComputeGradient(outputValues);
+            BuildPreviewData(voxelGrid, outputValues);
+
+            var coreIndicesList = coreVoxelSet.OrderBy(i => i).ToList();
+
+            // ── Final coverage check for reporting ────────────────────────────
+            var finalCoverage = ComputeFloorBFSCoverage(
+                coreVoxelSet, voxelsByFloor, keyToIndex,
+                orderedKeys, centers, maxDistance);
+
+            int nBeyond = 0;
+            for (int i = 0; i < n; i++)
+                if (!finalCoverage.Contains(i) && !coreVoxelSet.Contains(i))
+                    nBeyond++;
+
+            // ── Info ──────────────────────────────────────────────────────────
+            double outMin = outputValues.Count > 0 ? outputValues[0] : 0.0;
+            double outMax = outMin;
+            foreach (var v in outputValues)
+            {
+                if (v < outMin) outMin = v;
+                if (v > outMax) outMax = v;
+            }
+
+            string info = string.Format(
+                "Core Location | label='{0}' | mode={1} ({2}) | voxels={3}\n" +
+                "cores={4} | core_voxels={5} ({6:F1}% of grid)\n" +
+                "max_distance={7:F1} (BFS floor travel) | voxels_beyond={8}\n" +
+                "max_actual_dist={9:F2} | sa_channels={10}\n" +
+                "invert={11} — {12}\n" +
+                "output=[{13:F3} to {14:F3}]{15}",
+                resolvedLabel,
+                mode, MODE_NAMES[mode],
+                n,
+                coreFloorData.Count,
+                coreVoxelSet.Count,
+                n > 0 ? (double)coreVoxelSet.Count / n * 100.0 : 0.0,
+                maxDistance, nBeyond,
+                maxDist,
+                saChannels.Count,
+                invert,
+                invert ? "far from core scores HIGH"
+                       : "near core scores HIGH (default)",
+                outMin, outMax,
+                mode == 1
+                    ? string.Format("\nshift_penalty={0:F3} (auto-scaled)",
+                        maxDistance / 10.0 / vs)
+                    : "");
+
+            DA.SetData(0, analysis);
+            DA.SetDataList(1, outputValues);
+            DA.SetDataList(2, centers);
+            DA.SetDataList(3, gradient);
+            DA.SetDataList(4, coreIndicesList);
+            DA.SetDataList(5, isCore);
+            DA.SetDataList(6, coreCenterlines);
+            DA.SetDataTree(7, coreFootprintTree);
+            DA.SetData(8, info);
+        }
+
+        // ── Channel unwrapping ────────────────────────────────────────────────
+        // Each channel is normalised to 0..1 independently so that channels on
+        // different scales bias the search evenly.
+        private List<List<double>> UnwrapChannels(
+            List<object> analysisObjs, int n)
+        {
+            var result = new List<List<double>>();
+
+            foreach (var obj in analysisObjs)
+            {
+                var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
+                List<double> vals = null;
+
+                if (inner is SpatialAnalysis sa && sa.Values.Count == n)
+                {
+                    vals = new List<double>(sa.Values);
+                }
+                else if (inner != null)
+                {
+                    try
+                    {
+                        dynamic dyn = inner;
+                        var collected = new List<double>();
+                        foreach (var v in dyn.values)
+                            collected.Add(Convert.ToDouble(v));
+                        if (collected.Count == n) vals = collected;
+                    }
+                    catch { }
+                }
+
+                if (vals == null) continue;
+
+                double lo = vals[0], hi = vals[0];
+                foreach (var v in vals)
+                {
+                    if (v < lo) lo = v;
+                    if (v > hi) hi = v;
+                }
+
+                double range = hi - lo;
+                var normalised = new List<double>(n);
+                foreach (var v in vals)
+                    normalised.Add(range > 1e-12 ? (v - lo) / range : 0.0);
+
+                result.Add(normalised);
+            }
+
+            return result;
+        }
+
+        // ── Mode 0 — cores from curves ────────────────────────────────────────
+        private void BuildManualCores(
+            List<Curve> inputCurves,
+            List<Point3d> centers,
+            IReadOnlyList<(int, int, int)> orderedKeys,
+            double radius,
+            HashSet<int> coreVoxelSet,
+            List<List<(int, Point3d, List<int>)>> coreFloorData)
+        {
+            foreach (var curve in inputCurves)
+            {
+                if (curve == null) continue;
+
+                var floorGroups = new SortedDictionary<int, List<int>>();
+
+                for (int i = 0; i < centers.Count; i++)
+                {
+                    double t;
+                    if (!curve.ClosestPoint(centers[i], out t)) continue;
+
+                    double dist = centers[i].DistanceTo(curve.PointAt(t));
+                    if (dist > radius) continue;
+
+                    coreVoxelSet.Add(i);
+
+                    int iz = orderedKeys[i].Item3;
+                    if (!floorGroups.ContainsKey(iz))
+                        floorGroups[iz] = new List<int>();
+                    floorGroups[iz].Add(i);
+                }
+
+                var thisCore = new List<(int, Point3d, List<int>)>();
+                foreach (var kvp in floorGroups)
+                    thisCore.Add((kvp.Key, VoxelCentroid(kvp.Value, centers), kvp.Value));
+
+                if (thisCore.Count > 0)
+                    coreFloorData.Add(thisCore);
+            }
+        }
+
+        // ── Mode 1 — DP core search ───────────────────────────────────────────
+        // Returns the number of voxels still uncovered when the search stops.
+        private int BuildGenerativeCores(
+            int n, double vs, double radius, double maxDistance, int minIslandSize,
+            List<Point3d> centers,
+            IReadOnlyList<(int, int, int)> orderedKeys,
+            Dictionary<(int, int, int), int> keyToIndex,
+            SortedDictionary<int, List<int>> voxelsByFloor,
+            List<List<double>> saChannels,
+            HashSet<int> coreVoxelSet,
+            List<List<(int, Point3d, List<int>)>> coreFloorData)
+        {
+            // ── Per-voxel raw score. Lower is a better core candidate. ────────
+            var rawScore = new double[n];
+
+            foreach (var kvp in voxelsByFloor)
+            {
+                var floorVoxels = kvp.Value;
+
+                // Sampling keeps this tractable on large floors. The average
+                // distance to a sample stands in for average travel distance.
+                var sample = floorVoxels.Count <= 50
+                    ? floorVoxels
+                    : floorVoxels.Take(50).ToList();
+
+                foreach (var idx in floorVoxels)
+                {
+                    double avgDist = 0.0;
+                    if (sample.Count > 0)
+                    {
+                        foreach (var s in sample)
+                            avgDist += centers[idx].DistanceTo(centers[s]);
+                        avgDist /= sample.Count;
+                    }
+
+                    double saBonus = 0.0;
+                    if (saChannels.Count > 0)
+                    {
+                        foreach (var ch in saChannels) saBonus += ch[idx];
+                        saBonus /= saChannels.Count;
+                    }
+
+                    rawScore[idx] = (avgDist / maxDistance) - saBonus;
+                }
+            }
+
+            // ── Vertical blending so cores prefer to stack ────────────────────
+            var blendedScore = new double[n];
+            var floorList = voxelsByFloor.Keys.ToList();
+
+            for (int fi = 0; fi < floorList.Count; fi++)
+            {
+                var floorVoxels = voxelsByFloor[floorList[fi]];
+
+                var below = fi > 0
+                    ? voxelsByFloor[floorList[fi - 1]] : new List<int>();
+                var above = fi < floorList.Count - 1
+                    ? voxelsByFloor[floorList[fi + 1]] : new List<int>();
+
+                foreach (var idx in floorVoxels)
+                {
+                    int ix = orderedKeys[idx].Item1;
+                    int iy = orderedKeys[idx].Item2;
+
+                    double belowScore = GetNeighborScore(ix, iy, below, orderedKeys, rawScore);
+                    double aboveScore = GetNeighborScore(ix, iy, above, orderedKeys, rawScore);
+
+                    blendedScore[idx] = 0.60 * rawScore[idx]
+                                      + 0.25 * belowScore
+                                      + 0.15 * aboveScore;
+                }
+            }
+
+            // ── Iterative placement ───────────────────────────────────────────
+            // Shift penalty auto-scales so a horizontal jog only wins if it
+            // saves more than maxDistance/10 of travel.
+            double shiftPenalty = maxDistance / 10.0 / vs;
+
+            var uncovered = new HashSet<int>(Enumerable.Range(0, n));
+            int coreIter = 0;
+
+            while (uncovered.Count > 0 && coreIter < MAX_CORES)
+            {
+                coreIter++;
+
+                var floorsWithUncovered = new HashSet<int>();
+                foreach (var idx in uncovered)
+                    floorsWithUncovered.Add(orderedKeys[idx].Item3);
+
+                if (floorsWithUncovered.Count == 0) break;
+
+                // Include fully covered floors as traversable path nodes, so a
+                // core can run through served levels to reach unserved ones.
+                var coreFloors = voxelsByFloor.Keys
+                    .Where(f => floorsWithUncovered.Contains(f) ||
+                                voxelsByFloor[f].Any(idx => !uncovered.Contains(idx)))
+                    .OrderBy(f => f)
+                    .ToList();
+
+                if (coreFloors.Count == 0) break;
+
+                var dp = new Dictionary<int, double>();
+                var parent = new Dictionary<int, int>();
+
+                int botFloor = coreFloors.First(f => floorsWithUncovered.Contains(f));
+
+                foreach (var idx in voxelsByFloor[botFloor])
+                {
+                    // Covered voxels contribute no score — they are pure path.
+                    dp[idx] = uncovered.Contains(idx) ? blendedScore[idx] : 0.0;
+                    parent[idx] = -1;
+                }
+
+                for (int fi = 1; fi < coreFloors.Count; fi++)
+                {
+                    int curFloor = coreFloors[fi];
+                    int prevFloor = coreFloors[fi - 1];
+
+                    if (!voxelsByFloor.ContainsKey(prevFloor)) continue;
+
+                    foreach (var curIdx in voxelsByFloor[curFloor])
+                    {
+                        int cix = orderedKeys[curIdx].Item1;
+                        int ciy = orderedKeys[curIdx].Item2;
+
+                        double bestCost = double.MaxValue;
+                        int bestPrev = -1;
+
+                        foreach (var prevIdx in voxelsByFloor[prevFloor])
+                        {
+                            if (!dp.ContainsKey(prevIdx)) continue;
+
+                            int dix = Math.Abs(cix - orderedKeys[prevIdx].Item1);
+                            int diy = Math.Abs(ciy - orderedKeys[prevIdx].Item2);
+
+                            // At most one voxel of horizontal drift per floor,
+                            // so cores stay buildable rather than staircasing.
+                            if (dix > 1 || diy > 1) continue;
+
+                            double shift = Math.Sqrt(dix * dix + diy * diy);
+                            double score = uncovered.Contains(curIdx)
+                                ? blendedScore[curIdx] : 0.0;
+
+                            double cost = dp[prevIdx] + score + shift * shiftPenalty;
+
+                            if (cost < bestCost)
+                            {
+                                bestCost = cost;
+                                bestPrev = prevIdx;
+                            }
+                        }
+
+                        if (bestPrev >= 0)
+                        {
+                            dp[curIdx] = bestCost;
+                            parent[curIdx] = bestPrev;
+                        }
+                    }
+                }
+
+                // ── Pick the best endpoint and trace back ─────────────────────
+                int topFloor = coreFloors.Last(f => floorsWithUncovered.Contains(f));
+
+                int bestEnd = -1;
+                double bestDP = double.MaxValue;
+
+                foreach (var idx in voxelsByFloor[topFloor])
+                {
+                    if (!dp.ContainsKey(idx) || !uncovered.Contains(idx)) continue;
+                    if (dp[idx] < bestDP) { bestDP = dp[idx]; bestEnd = idx; }
+                }
+
+                if (bestEnd < 0)
+                {
+                    foreach (var idx in voxelsByFloor[topFloor])
+                    {
+                        if (!dp.ContainsKey(idx)) continue;
+                        if (dp[idx] < bestDP) { bestDP = dp[idx]; bestEnd = idx; }
+                    }
+                }
+
+                if (bestEnd < 0)
+                {
+                    var fallback = voxelsByFloor[botFloor]
+                        .Where(idx => uncovered.Contains(idx))
+                        .OrderBy(idx => blendedScore[idx])
+                        .ToList();
+                    if (fallback.Count == 0) break;
+                    bestEnd = fallback[0];
+                }
+
+                var pathIndices = new List<int>();
+                int cur = bestEnd;
+                int safety = n + 1;
+
+                while (cur >= 0 && safety-- > 0)
+                {
+                    pathIndices.Add(cur);
+                    cur = parent.ContainsKey(cur) ? parent[cur] : -1;
+                }
+                pathIndices.Reverse();
+
+                // ── Expand the path into core voxels ──────────────────────────
+                var thisFloorData = new List<(int, Point3d, List<int>)>();
+                var pathByFloor = new SortedDictionary<int, int>();
+
+                foreach (var idx in pathIndices)
+                {
+                    int iz = orderedKeys[idx].Item3;
+                    if (!pathByFloor.ContainsKey(iz)) pathByFloor[iz] = idx;
+                }
+
+                foreach (var kvp in pathByFloor)
+                {
+                    int floor = kvp.Key;
+                    var seedPt = centers[kvp.Value];
+
+                    var floorCore = new List<int>();
+                    if (voxelsByFloor.ContainsKey(floor))
+                    {
+                        foreach (var idx in voxelsByFloor[floor])
+                            if (centers[idx].DistanceTo(seedPt) <= radius)
+                                floorCore.Add(idx);
+                    }
+
+                    if (floorCore.Count == 0) floorCore.Add(kvp.Value);
+
+                    foreach (var idx in floorCore) coreVoxelSet.Add(idx);
+
+                    thisFloorData.Add((floor, VoxelCentroid(floorCore, centers), floorCore));
+                }
+
+                if (thisFloorData.Count > 0)
+                    coreFloorData.Add(thisFloorData);
+
+                var coverage = ComputeFloorBFSCoverage(
+                    coreVoxelSet, voxelsByFloor, keyToIndex,
+                    orderedKeys, centers, maxDistance);
+
+                int before = uncovered.Count;
+                uncovered.ExceptWith(coverage);
+                uncovered.ExceptWith(coreVoxelSet);
+
+                // No progress means the remainder is unreachable — adding more
+                // cores would loop without ever satisfying max_distance.
+                if (uncovered.Count == before) break;
+            }
+
+            return uncovered.Count;
+        }
+
+        // ── Centerlines and floor footprints ──────────────────────────────────
+        private void BuildCoreGeometry(
+            List<List<(int floor, Point3d centroid, List<int> indices)>> coreFloorData,
+            List<Point3d> centers,
+            double vs,
+            List<Curve> coreCenterlines,
+            GH_Structure<GH_Curve> coreFootprintTree)
+        {
             for (int c = 0; c < coreFloorData.Count; c++)
             {
                 var path = new GH_Path(c);
-                var floorData = coreFloorData[c]
-                    .OrderBy(f => f.floor)
-                    .ToList();
-
+                var floorData = coreFloorData[c].OrderBy(f => f.floor).ToList();
                 if (floorData.Count == 0) continue;
 
-                // ── One continuous centerline polyline ─────────────────────────
+                // ── Centerline ────────────────────────────────────────────────
                 var clPts = floorData.Select(f => f.centroid).ToList();
 
                 if (clPts.Count == 1)
                 {
                     var p0 = clPts[0];
-                    coreCenterlines.Add(new LineCurve(p0,
-                        new Point3d(p0.X, p0.Y, p0.Z + vs)));
+                    coreCenterlines.Add(new LineCurve(
+                        p0, new Point3d(p0.X, p0.Y, p0.Z + vs)));
                 }
                 else
                 {
-                    coreCenterlines.Add(
-                        new Polyline(clPts).ToNurbsCurve());
+                    coreCenterlines.Add(new Polyline(clPts).ToNurbsCurve());
                 }
 
-                // ── Floor footprints ───────────────────────────────────────────
+                // ── Per-floor bounding rectangles ─────────────────────────────
                 foreach (var (floor, centroid, floorIndices) in floorData)
                 {
                     if (floorIndices.Count == 0) continue;
 
-                    var pts = floorIndices.Select(idx => centers[idx]).ToList();
-                    double minX = pts.Min(p => p.X);
-                    double maxX = pts.Max(p => p.X);
-                    double minY = pts.Min(p => p.Y);
-                    double maxY = pts.Max(p => p.Y);
-                    double avgZ = pts.Average(p => p.Z);
+                    double minX = double.MaxValue, maxX = double.MinValue;
+                    double minY = double.MaxValue, maxY = double.MinValue;
+                    double sumZ = 0.0;
 
+                    foreach (var idx in floorIndices)
+                    {
+                        var p = centers[idx];
+                        if (p.X < minX) minX = p.X;
+                        if (p.X > maxX) maxX = p.X;
+                        if (p.Y < minY) minY = p.Y;
+                        if (p.Y > maxY) maxY = p.Y;
+                        sumZ += p.Z;
+                    }
+
+                    double avgZ = sumZ / floorIndices.Count;
+
+                    // Grow by half a voxel so the rectangle wraps the voxel
+                    // bodies rather than threading their centres.
                     double hs = vs * 0.5;
                     minX -= hs; maxX += hs;
                     minY -= hs; maxY += hs;
@@ -601,94 +855,15 @@ namespace SpatialMorphology
                     };
 
                     coreFootprintTree.Append(
-                        new GH_Curve(new Polyline(rectPts).ToNurbsCurve()),
-                        path);
+                        new GH_Curve(new Polyline(rectPts).ToNurbsCurve()), path);
                 }
             }
-
-            // ── Compute inverted distance to nearest core ─────────────────────
-            var coreCenterPts = coreVoxelSet
-                .Select(idx => centers[idx])
-                .ToList();
-
-            var raw = new List<double>(n);
-            var isCore = new List<bool>(n);
-            double maxDist = 0;
-
-            for (int i = 0; i < n; i++)
-            {
-                if (coreVoxelSet.Contains(i))
-                {
-                    raw.Add(0.0);
-                    isCore.Add(true);
-                    continue;
-                }
-
-                isCore.Add(false);
-
-                if (coreCenterPts.Count == 0)
-                {
-                    raw.Add(0.0);
-                    continue;
-                }
-
-                double minDist = coreCenterPts
-                    .Min(cp => centers[i].DistanceTo(cp));
-                raw.Add(minDist);
-                if (minDist > maxDist) maxDist = minDist;
-            }
-
-            var invertedRaw = raw.Select(d => maxDist - d).ToList();
-
-            // ── Build analysis output ─────────────────────────────────────────
-            var analysis = new SpatialAnalysis(resolvedLabel, invertedRaw);
-            var gradient = ComputeGradient(invertedRaw);
-            BuildPreviewData(voxelGrid, invertedRaw);
-
-            var coreIndicesList = coreVoxelSet.OrderBy(i => i).ToList();
-
-            // ── Final BFS coverage for info ───────────────────────────────────
-            var finalCoverage = ComputeFloorBFSCoverage(
-                coreVoxelSet, voxelsByFloor, keyToIndex,
-                orderedKeys, centers, maxDistance);
-            int nBeyond = Enumerable.Range(0, n)
-                .Count(i => !finalCoverage.Contains(i) &&
-                            !coreVoxelSet.Contains(i));
-
-            // ── Info ──────────────────────────────────────────────────────────
-            string[] modeNames = { "Manual", "Generative (DP + BFS)" };
-            string info = string.Format(
-                "CoreLocation | mode={0} ({1}) | voxels={2}\n" +
-                "cores={3} | core_voxels={4} ({5:F1}% of grid)\n" +
-                "max_distance={6:F1} (BFS floor travel) | voxels_beyond={7}\n" +
-                "max_actual_dist={8:F2} | sa_channels={9}\n" +
-                "shift_penalty={10:F3} (auto-scaled)",
-                mode, modeNames[mode],
-                n,
-                coreFloorData.Count,
-                coreVoxelSet.Count,
-                n > 0 ? (double)coreVoxelSet.Count / n * 100.0 : 0,
-                maxDistance, nBeyond,
-                maxDist,
-                saChannels.Count,
-                mode == 1 ? maxDistance / 10.0 / vs : 0.0);
-
-            // ── Output ────────────────────────────────────────────────────────
-            DA.SetData(0, analysis);
-            DA.SetDataList(1, invertedRaw);
-            DA.SetDataList(2, centers);
-            DA.SetDataList(3, gradient);
-            DA.SetDataList(4, coreIndicesList);
-            DA.SetDataList(5, isCore);
-            DA.SetDataList(6, coreCenterlines);
-            DA.SetDataTree(7, coreFootprintTree);
-            DA.SetData(8, info);
         }
 
-        // ── BFS floor travel coverage ─────────────────────────────────────────
-        // Returns set of voxel indices reachable from any core voxel
-        // within maxDistance by walking along connected floor voxels.
-        // Disjointed islands with no core voxel are NOT covered.
+        // ── BFS coverage along each floor ─────────────────────────────────────
+        // Walks outward from core voxels through connected floor voxels only.
+        // An island with no core voxel is never reached, which is the point —
+        // straight-line distance would wrongly report it as served.
         private HashSet<int> ComputeFloorBFSCoverage(
             HashSet<int> coreVoxelSet,
             SortedDictionary<int, List<int>> voxelsByFloor,
@@ -704,17 +879,14 @@ namespace SpatialMorphology
 
             foreach (var kvp in voxelsByFloor)
             {
-                int floor = kvp.Key;
                 var floorVoxels = new HashSet<int>(kvp.Value);
 
-                // Find core voxels on this floor
-                var floorCores = floorVoxels
-                    .Where(idx => coreVoxelSet.Contains(idx))
-                    .ToList();
+                var floorCores = new List<int>();
+                foreach (var idx in floorVoxels)
+                    if (coreVoxelSet.Contains(idx)) floorCores.Add(idx);
 
                 if (floorCores.Count == 0) continue;
 
-                // Multi-source BFS from all core voxels on this floor
                 var dist = new Dictionary<int, double>();
                 var queue = new Queue<int>();
 
@@ -738,19 +910,17 @@ namespace SpatialMorphology
                     {
                         var nbKey = (ix + dix[d], iy + diy[d], iz);
                         if (!keyToIndex.ContainsKey(nbKey)) continue;
+
                         int nbIdx = keyToIndex[nbKey];
                         if (!floorVoxels.Contains(nbIdx)) continue;
                         if (dist.ContainsKey(nbIdx)) continue;
 
-                        double newDist = curD +
-                            centers[curr].DistanceTo(centers[nbIdx]);
+                        double newDist = curD + centers[curr].DistanceTo(centers[nbIdx]);
+                        if (newDist > maxDistance) continue;
 
-                        if (newDist <= maxDistance)
-                        {
-                            dist[nbIdx] = newDist;
-                            queue.Enqueue(nbIdx);
-                            covered.Add(nbIdx);
-                        }
+                        dist[nbIdx] = newDist;
+                        queue.Enqueue(nbIdx);
+                        covered.Add(nbIdx);
                     }
                 }
             }
@@ -758,7 +928,7 @@ namespace SpatialMorphology
             return covered;
         }
 
-        // ── Get neighbor score for vertical blending ──────────────────────────
+        // ── Average score of vertically adjacent voxels ───────────────────────
         private double GetNeighborScore(
             int ix, int iy,
             List<int> neighborVoxels,
@@ -767,21 +937,25 @@ namespace SpatialMorphology
         {
             if (neighborVoxels.Count == 0) return 0.0;
 
-            var nearby = neighborVoxels
-                .Where(idx =>
-                    Math.Abs(orderedKeys[idx].Item1 - ix) <= 1 &&
-                    Math.Abs(orderedKeys[idx].Item2 - iy) <= 1)
-                .ToList();
+            double sum = 0.0;
+            int count = 0;
 
-            return nearby.Count > 0
-                ? nearby.Average(idx => rawScore[idx])
-                : rawScore[neighborVoxels[0]];
+            foreach (var idx in neighborVoxels)
+            {
+                if (Math.Abs(orderedKeys[idx].Item1 - ix) > 1) continue;
+                if (Math.Abs(orderedKeys[idx].Item2 - iy) > 1) continue;
+                sum += rawScore[idx];
+                count++;
+            }
+
+            return count > 0 ? sum / count : rawScore[neighborVoxels[0]];
         }
 
-        // ── Centroid of a list of voxel indices ───────────────────────────────
+        // ── Centroid of a voxel index list ────────────────────────────────────
         private Point3d VoxelCentroid(List<int> indices, List<Point3d> centers)
         {
             if (indices.Count == 0) return Point3d.Origin;
+
             double cx = 0, cy = 0, cz = 0;
             foreach (var idx in indices)
             {
@@ -789,9 +963,11 @@ namespace SpatialMorphology
                 cy += centers[idx].Y;
                 cz += centers[idx].Z;
             }
-            return new Point3d(cx / indices.Count,
-                               cy / indices.Count,
-                               cz / indices.Count);
+
+            return new Point3d(
+                cx / indices.Count,
+                cy / indices.Count,
+                cz / indices.Count);
         }
     }
 }

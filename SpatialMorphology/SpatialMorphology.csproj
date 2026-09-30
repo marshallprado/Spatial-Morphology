@@ -28,8 +28,7 @@
 	</PropertyGroup>
 
 	<!-- Guard: WPF/WinForms silently break macOS. Fail the build if reintroduced. -->
-	<Target Name="FailOnWindowsOnlyUI" BeforeTargets="Build"
-	        Condition="'$(UseWPF)' == 'true' or '$(UseWindowsForms)' == 'true'">
+	<Target Name="FailOnWindowsOnlyUI" BeforeTargets="Build" Condition="'$(UseWPF)' == 'true' or '$(UseWindowsForms)' == 'true'">
 		<Error Text="UseWPF/UseWindowsForms are not permitted: they break macOS. Use Eto.Forms." />
 	</Target>
 
@@ -38,48 +37,55 @@
 	     Rhino supplies these assemblies at runtime; copying them next to
 	     the .gha causes assembly-identity conflicts and load failures. -->
 	<ItemGroup>
+		<PackageReference Include="Eto.Forms" Version="2.11.0" />
 		<PackageReference Include="Grasshopper" Version="8.31.26126.13431" ExcludeAssets="runtime" PrivateAssets="all" />
 		<PackageReference Include="RhinoCommon" Version="8.31.26126.13431" ExcludeAssets="runtime" PrivateAssets="all" />
-		<PackageReference Include="Eto.Forms" Version="2.*" ExcludeAssets="runtime" PrivateAssets="all" />
 		<ProjectReference Include="..\SpatialMorphology.Core\SpatialMorphology.Core.csproj" />
 	</ItemGroup>
 
 	<!-- ============ Embedded icons ================================ -->
 	<ItemGroup>
 		<None Remove="Resources\AnalysisStack_24.png" />
+		<None Remove="Resources\Composite_24.png" />
 		<None Remove="Resources\CoreLocation_24.png" />
+		<None Remove="Resources\FloorLevel_24.png" />
+		<None Remove="Resources\NeighborCount_24.png" />
 		<None Remove="Resources\NormalizeValues_24.png" />
+		<None Remove="Resources\Orientation_24.png" />
 		<None Remove="Resources\ProgramDefinition_24.png" />
+		<None Remove="Resources\Proximity_24.png" />
 		<None Remove="Resources\SA_Adjacency_24.png" />
-		<None Remove="Resources\SA_Depth_24.png" />
+		<None Remove="Resources\SA_Composite_24.png" />
 		<None Remove="Resources\SA_FloorLevel_24.png" />
 		<None Remove="Resources\SA_GeoDist_24.png" />
 		<None Remove="Resources\SA_Isovist_24.png" />
 		<None Remove="Resources\SA_Orientation_24.png" />
-		<None Remove="Resources\SA_Proximity_24.png" />
 		<None Remove="Resources\SA_Solar_24.png" />
 		<None Remove="Resources\SA_ViewAnalysis_24.png" />
+		<None Remove="Resources\Solar_24.png" />
 		<None Remove="Resources\SunVectors_24.png" />
 		<None Remove="Resources\ValueSet_24.png" />
+		<None Remove="Resources\View_24.png" />
+		<None Remove="Resources\Visibility_24.png" />
 		<None Remove="Resources\VoxelGrid_24.png" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<EmbeddedResource Include="Resources\AnalysisStack_24.png" />
+		<EmbeddedResource Include="Resources\Composite_24.png" />
 		<EmbeddedResource Include="Resources\CoreLocation_24.png" />
+		<EmbeddedResource Include="Resources\FloorLevel_24.png" />
+		<EmbeddedResource Include="Resources\NeighborCount_24.png" />
 		<EmbeddedResource Include="Resources\NormalizeValues_24.png" />
+		<EmbeddedResource Include="Resources\Orientation_24.png" />
 		<EmbeddedResource Include="Resources\ProgramDefinition_24.png" />
-		<EmbeddedResource Include="Resources\SA_Adjacency_24.png" />
-		<EmbeddedResource Include="Resources\SA_Depth_24.png" />
-		<EmbeddedResource Include="Resources\SA_FloorLevel_24.png" />
-		<EmbeddedResource Include="Resources\SA_GeoDist_24.png" />
-		<EmbeddedResource Include="Resources\SA_Isovist_24.png" />
-		<EmbeddedResource Include="Resources\SA_Orientation_24.png" />
-		<EmbeddedResource Include="Resources\SA_Proximity_24.png" />
-		<EmbeddedResource Include="Resources\SA_Solar_24.png" />
-		<EmbeddedResource Include="Resources\SA_ViewAnalysis_24.png" />
+		<EmbeddedResource Include="Resources\Proximity_24.png" />
+		<EmbeddedResource Include="Resources\Solar_24.png" />
+		<EmbeddedResource Include="Resources\SurfaceDistance_24.png" />
 		<EmbeddedResource Include="Resources\SunVectors_24.png" />
 		<EmbeddedResource Include="Resources\ValueSet_24.png" />
+		<EmbeddedResource Include="Resources\View_24.png" />
+		<EmbeddedResource Include="Resources\Visibility_24.png" />
 		<EmbeddedResource Include="Resources\VoxelGrid_24.png" />
 	</ItemGroup>
 
@@ -94,18 +100,12 @@
 		<GhaDeployFiles Include="$(TargetDir)SpatialMorphology.Core.dll" />
 	</ItemGroup>
 
-	<Target Name="DeployToGrasshopperWindows" AfterTargets="Build"
-	        Condition="'$(OS)' == 'Windows_NT'">
-		<Copy SourceFiles="@(GhaDeployFiles)"
-		      DestinationFolder="$(AppData)\Grasshopper\Libraries"
-		      ContinueOnError="true" />
+	<Target Name="DeployToGrasshopperWindows" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
+		<Copy SourceFiles="@(GhaDeployFiles)" DestinationFolder="$(AppData)\Grasshopper\Libraries" />
 	</Target>
 
-	<Target Name="DeployToGrasshopperMac" AfterTargets="Build"
-	        Condition="'$(OS)' != 'Windows_NT'">
-		<Copy SourceFiles="@(GhaDeployFiles)"
-		      DestinationFolder="$(HOME)/Library/Application Support/McNeel/Rhinoceros/8.0/Plug-ins/Grasshopper (b45a29b1-4343-4035-989e-044e8580d9cf)/Libraries"
-		      ContinueOnError="true" />
+	<Target Name="DeployToGrasshopperMac" AfterTargets="Build" Condition="'$(OS)' != 'Windows_NT'">
+		<Copy SourceFiles="@(GhaDeployFiles)" DestinationFolder="$(HOME)/Library/Application Support/McNeel/Rhinoceros/8.0/Plug-ins/Grasshopper (b45a29b1-4343-4035-989e-044e8580d9cf)/Libraries" ContinueOnError="true" />
 	</Target>
 
 </Project>
