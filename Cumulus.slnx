@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+  </Configurations>
+  <Project Path="Cumulus.Core/Cumulus.Core.csproj" />
+  <Project Path="tests/Cumulus.Core.Tests/Cumulus.Core.Tests.csproj" />
+  <Project Path="Cumulus/Cumulus.csproj" />
+</Solution>

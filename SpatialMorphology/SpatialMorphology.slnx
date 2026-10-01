@@ -1,8 +1,0 @@
-<Solution>
-  <Configurations>
-    <Platform Name="Any CPU" />
-  </Configurations>
-  <Project Path="../SpatialMorphology.Core/SpatialMorphology.Core.csproj" />
-  <Project Path="../tests/SpatialMorphology.Core.Tests/SpatialMorphology.Core.Tests.csproj" />
-  <Project Path="SpatialMorphology.csproj" />
-</Solution>
