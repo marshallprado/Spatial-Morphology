@@ -17,6 +17,13 @@ namespace Cumulus
     /// </summary>
     public class AnalysisStackComponent : GH_Component
     {
+        // Preview data is independent of the shader output. The output retains
+        // score alpha; viewport colors are intentionally rendered opaque.
+        private readonly List<Point3d> _previewPoints = new List<Point3d>();
+        private readonly List<Box> _previewBoxes = new List<Box>();
+        private readonly List<Color> _previewColors = new List<Color>();
+        private bool _previewAsBoxes;
+
         // -- Constructor -------------------------------------------------------
         public AnalysisStackComponent()
             : base(
@@ -40,7 +47,7 @@ namespace Cumulus
                 "3 | Main")
         { }
 
-        // -- GUID — DO NOT CHANGE ----------------------------------------------
+        // -- GUID â€” DO NOT CHANGE ----------------------------------------------
         public override Guid ComponentGuid =>
             new Guid("C3D4E5F6-A7B8-9012-CDEF-012345678908");
 
@@ -56,7 +63,7 @@ namespace Cumulus
             }
         }
 
-        // -- Parameters — order and nicknames unchanged ------------------------
+        // -- Parameters â€” order and nicknames unchanged ------------------------
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddGenericParameter("voxel_grid", "VG",
@@ -64,7 +71,7 @@ namespace Cumulus
                 GH_ParamAccess.item);
             pManager.AddGenericParameter("analysis", "A",
                 "List of SpatialAnalysis objects from SA components.\n" +
-                "Accepts flat list or DataTree — flattened automatically.",
+                "Accepts flat list or DataTree â€” flattened automatically.",
                 GH_ParamAccess.tree);
             pManager.AddGenericParameter("programs", "P",
                 "List of ProgramDefinition objects.",
@@ -72,7 +79,7 @@ namespace Cumulus
             pManager.AddGenericParameter("value_sets", "VS",
                 "Optional. List of ValueSet objects from ValueSet component.\n" +
                 "Matched to programs by ProgramName automatically.\n" +
-                "Accepts flat list or DataTree — flattened automatically.",
+                "Accepts flat list or DataTree â€” flattened automatically.",
                 GH_ParamAccess.tree);
             pManager.AddBooleanParameter("show_all", "SA",
                 "True  = all voxels assigned to a program.\n" +
@@ -303,6 +310,13 @@ namespace Cumulus
                 result.WinningScore,
                 result.Ranked);
 
+            // -- Viewport preview ---------------------------------------------
+            // Match SAComponentBase point preview exactly when VoxelGrid uses
+            // points. Shader alpha remains in output S; preview is opaque.
+            BuildPreviewData(
+                voxelGrid, result, progList, alphas,
+                useCore, coreSet, showUnassigned);
+
             // -- Info ----------------------------------------------------------
             string info = BuildInfo(
                 result, progList, method, useCore, showUnassigned,
@@ -314,6 +328,140 @@ namespace Cumulus
             DA.SetDataTree(2, voxelTree);
             DA.SetDataTree(3, shaderTree);
             DA.SetData(4, info);
+        }
+
+        // -- Viewport preview -------------------------------------------------
+
+        private static Color ToOpaqueDisplayColor(Color color)
+        {
+            return Color.FromArgb(255, color.R, color.G, color.B);
+        }
+
+        private void BuildPreviewData(
+            VoxelGrid voxelGrid,
+            ScoringResult result,
+            List<ProgramDefinition> programs,
+            IReadOnlyList<int> alphas,
+            bool useCore,
+            HashSet<int> coreSet,
+            bool showUnassigned)
+        {
+            _previewPoints.Clear();
+            _previewBoxes.Clear();
+            _previewColors.Clear();
+            _previewAsBoxes = voxelGrid.ShowBoxes;
+
+            for (int p = 0; p < programs.Count; p++)
+            {
+                var programColor = programs[p].Color;
+                foreach (var voxelIndex in result.Ranked[p])
+                {
+                    var shaderColor = Color.FromArgb(
+                        alphas[voxelIndex], programColor.R, programColor.G, programColor.B);
+                    AddPreviewVoxel(voxelGrid, voxelIndex, shaderColor);
+                }
+            }
+
+            if (useCore)
+            {
+                var coreColor = Color.FromArgb(180, 80, 80, 80);
+                foreach (var voxelIndex in coreSet.OrderBy(index => index))
+                    AddPreviewVoxel(voxelGrid, voxelIndex, coreColor);
+            }
+
+            if (showUnassigned)
+            {
+                var unassignedColor = Color.FromArgb(40, 160, 160, 160);
+                for (int voxelIndex = 0; voxelIndex < result.ProgramIndices.Count; voxelIndex++)
+                {
+                    if (result.ProgramIndices[voxelIndex] != -1)
+                        continue;
+                    if (useCore && coreSet.Contains(voxelIndex))
+                        continue;
+                    AddPreviewVoxel(voxelGrid, voxelIndex, unassignedColor);
+                }
+            }
+        }
+
+        private void AddPreviewVoxel(VoxelGrid voxelGrid, int voxelIndex, Color shaderColor)
+        {
+            var key = voxelGrid.FilledKeys[voxelIndex];
+            _previewColors.Add(ToOpaqueDisplayColor(shaderColor));
+
+            if (_previewAsBoxes)
+                _previewBoxes.Add(voxelGrid.KeyToBox(key));
+            else
+                _previewPoints.Add(voxelGrid.KeyToCenter(key));
+        }
+
+        public override void DrawViewportMeshes(IGH_PreviewArgs args)
+        {
+            if (Hidden || !IsPreviewCapable || !_previewAsBoxes)
+                return;
+
+            for (int i = 0; i < _previewBoxes.Count && i < _previewColors.Count; i++)
+            {
+                var brep = _previewBoxes[i].ToBrep();
+                if (brep == null)
+                    continue;
+
+                try
+                {
+                    args.Display.DrawBrepShaded(
+                        brep,
+                        new Rhino.Display.DisplayMaterial(_previewColors[i]));
+                }
+                finally
+                {
+                    brep.Dispose();
+                }
+            }
+        }
+
+        public override void DrawViewportWires(IGH_PreviewArgs args)
+        {
+            if (Hidden || !IsPreviewCapable)
+                return;
+
+            if (_previewAsBoxes)
+            {
+                for (int i = 0; i < _previewBoxes.Count && i < _previewColors.Count; i++)
+                    args.Display.DrawBox(_previewBoxes[i], _previewColors[i]);
+                return;
+            }
+
+            // Identical to SAComponentBase's point preview.
+            for (int i = 0; i < _previewPoints.Count && i < _previewColors.Count; i++)
+            {
+                args.Display.DrawPoint(
+                    _previewPoints[i],
+                    Rhino.Display.PointStyle.RoundSimple,
+                    5,
+                    _previewColors[i]);
+            }
+        }
+
+        public override bool IsPreviewCapable => true;
+
+        public override BoundingBox ClippingBox
+        {
+            get
+            {
+                var boundingBox = BoundingBox.Empty;
+
+                if (_previewAsBoxes)
+                {
+                    foreach (var box in _previewBoxes)
+                        boundingBox.Union(box.BoundingBox);
+                }
+                else
+                {
+                    foreach (var point in _previewPoints)
+                        boundingBox.Union(point);
+                }
+
+                return boundingBox;
+            }
         }
 
         // -- Unwrap helpers ----------------------------------------------------
@@ -476,14 +624,14 @@ namespace Cumulus
                     nUnassigned, unassignedBranchIdx));
             else
                 lines.AppendLine(string.Format(
-                    "Unassigned  : {0} (hidden — show_unassigned=False)",
+                    "Unassigned  : {0} (hidden â€” show_unassigned=False)",
                     nUnassigned));
 
             return lines.ToString().TrimEnd();
         }
     }
 
-    // -- AnalysisStackData — downstream data container -------------------------
+    // -- AnalysisStackData â€” downstream data container -------------------------
     // Stays in the Grasshopper layer: it holds a VoxelGrid, which is
     // RhinoCommon-dependent and therefore cannot live in Core.
     public class AnalysisStackData
