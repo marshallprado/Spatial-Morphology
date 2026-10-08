@@ -60,6 +60,7 @@
 		<None Remove="Resources\Composite_24.png" />
 		<None Remove="Resources\CoreLocation_24.png" />
 		<None Remove="Resources\FloorLevel_24.png" />
+		<None Remove="Resources\Merge_24.png" />
 		<None Remove="Resources\NeighborCount_24.png" />
 		<None Remove="Resources\NormalizeValues_24.png" />
 		<None Remove="Resources\Orientation_24.png" />
@@ -79,6 +80,7 @@
 		<EmbeddedResource Include="Resources\Composite_24.png" />
 		<EmbeddedResource Include="Resources\CoreLocation_24.png" />
 		<EmbeddedResource Include="Resources\FloorLevel_24.png" />
+		<EmbeddedResource Include="Resources\Merge_24.png" />
 		<EmbeddedResource Include="Resources\NeighborCount_24.png" />
 		<EmbeddedResource Include="Resources\NormalizeValues_24.png" />
 		<EmbeddedResource Include="Resources\Orientation_24.png" />

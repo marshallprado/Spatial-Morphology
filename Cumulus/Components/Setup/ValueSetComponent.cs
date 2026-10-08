@@ -65,7 +65,7 @@ namespace Cumulus
                 "1 | Setup")
         { }
 
-        // -- GUID — DO NOT CHANGE ----------------------------------------------
+        // -- GUID â€” DO NOT CHANGE ----------------------------------------------
         public override Guid ComponentGuid =>
             new Guid("B1C2D3E4-F5A6-7890-BCDE-F12345678901");
 
@@ -101,9 +101,9 @@ namespace Cumulus
         // NOTE: no AppendAdditionalMenuItems override here. The Grasshopper
         // signature for it takes a System.Windows.Forms.ToolStripDropDown, which
         // does not exist in the macOS Rhino runtime. Archive housekeeping is
-        // offered inside the Eto editor instead — see OpenWeightsEditor.
+        // offered inside the Eto editor instead â€” see OpenWeightsEditor.
 
-        // -- Parameters — order and nicknames unchanged -------------------------
+        // -- Parameters â€” order and nicknames unchanged -------------------------
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddGenericParameter("analysis", "A",
@@ -117,8 +117,9 @@ namespace Cumulus
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddGenericParameter("value_sets", "VS",
-                "List of ValueSet objects. Wire into AnalysisStack.",
+            pManager.AddGenericParameter("programs", "P",
+                "ProgramDefinition objects coupled with their ValueSet weights. " +
+                "Wire directly into AnalysisStack P.",
                 GH_ParamAccess.list);
             pManager.AddTextParameter("info", "I",
                 "Summary of current weights.",
@@ -140,28 +141,33 @@ namespace Cumulus
             if (!DA.GetDataList(0, analysisObjects)) return;
             if (!DA.GetDataList(1, programObjects)) return;
 
-            // -- Extract program names, preserving input order -----------------
+            // -- Extract complete programs, preserving input order --------------
+            var programs = new List<ProgramDefinition>();
             var programNames = new List<string>();
+            var seenProgramNames = new HashSet<string>(StringComparer.Ordinal);
+
             foreach (var obj in programObjects)
             {
-                var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper w
-                    ? w.Value : obj;
-                if (inner == null) continue;
+                var program = UnwrapProgram(obj);
 
-                if (inner is ProgramDefinition pd)
+                if (program == null)
                 {
-                    if (!programNames.Contains(pd.Name))
-                        programNames.Add(pd.Name);
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Warning,
+                        "Ignored an input that is not a valid ProgramDefinition.");
                     continue;
                 }
-                try
+
+                if (!seenProgramNames.Add(program.Name))
                 {
-                    dynamic dynObj = inner;
-                    string n = dynObj.name?.ToString();
-                    if (!string.IsNullOrWhiteSpace(n) && !programNames.Contains(n))
-                        programNames.Add(n);
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Warning,
+                        $"Ignored duplicate program '{program.Name}'.");
+                    continue;
                 }
-                catch { }
+
+                programs.Add(program);
+                programNames.Add(program.Name);
             }
 
             // -- Extract channel labels, preserving input order ----------------
@@ -219,14 +225,21 @@ namespace Cumulus
                         _weights[prog][ch] = 1.0;
             }
 
-            // -- Build ValueSet outputs from LIVE lists only -------------------
-            var valueSets = new List<ValueSet>();
-            foreach (var prog in programNames)
+            // -- Build coupled ProgramDefinition + ValueSet outputs -------------
+            // AnalysisStack can consume these directly through its P input.
+            var programsWithValueSets = new List<ProgramWithValueSet>();
+
+            foreach (var program in programs)
             {
-                var ws = new Dictionary<string, double>();
-                foreach (var ch in channelLabels)
-                    ws[ch] = LookupWeight(prog, ch);
-                valueSets.Add(new ValueSet(prog, ws));
+                var weights = new Dictionary<string, double>();
+
+                foreach (var channel in channelLabels)
+                    weights[channel] = LookupWeight(program.Name, channel);
+
+                var valueSet = new ValueSet(program.Name, weights);
+
+                programsWithValueSets.Add(
+                    new ProgramWithValueSet(program, valueSet));
             }
 
             // -- Info string ---------------------------------------------------
@@ -265,8 +278,47 @@ namespace Cumulus
                     "its value back, or clear them from the editor.");
             }
 
-            DA.SetDataList(0, valueSets);
+            DA.SetDataList(0, programsWithValueSets);
             DA.SetData(1, lines.ToString().TrimEnd());
+        }
+
+        // -- Program unwrapping -----------------------------------------------
+        private static ProgramDefinition? UnwrapProgram(object obj)
+        {
+            var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper wrapper
+                ? wrapper.Value
+                : obj;
+
+            if (inner == null)
+                return null;
+
+            if (inner is ProgramDefinition program)
+                return program;
+
+            try
+            {
+                dynamic value = inner;
+
+                string? name = value.name?.ToString();
+                if (string.IsNullOrWhiteSpace(name))
+                    return null;
+
+                int voxelCount = Convert.ToInt32(value.voxel_count);
+
+                dynamic color = value.color;
+                int red = Convert.ToInt32(color.R);
+                int green = Convert.ToInt32(color.G);
+                int blue = Convert.ToInt32(color.B);
+
+                return new ProgramDefinition(
+                    name,
+                    Color.FromArgb(255, red, green, blue),
+                    voxelCount);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         // -- Archive lookup ----------------------------------------------------
@@ -391,7 +443,7 @@ namespace Cumulus
             ExpireSolution(true);
         }
 
-        // -- Serialization — original keys preserved, do not rename -------------
+        // -- Serialization â€” original keys preserved, do not rename -------------
         public override bool Write(GH_IO.Serialization.GH_IWriter writer)
         {
             writer.SetInt32("schema", 2);

@@ -1,0 +1,42 @@
+*** Begin Patch
+*** Update File: Cumulus/Components/Main/OptimizeStructureComponent.cs
+@@
+             pManager.AddNumberParameter(
+                 "importance", "IM",
+                 "One structural-importance scalar per VoxelGrid index. " +
+                 "Program/core and unused candidate voxels have zero importance.",
+                 GH_ParamAccess.list);
+
++            pManager.AddNumberParameter(
++                "structural_capacity", "PC",
++                "Conceptual route capacity per VoxelGrid index. Downward paths retain " +
++                "capacity; horizontal and upward transfers reduce it. This is a design " +
++                "diagnostic, not an engineering capacity.",
++                GH_ParamAccess.list);
++
++            pManager.AddIntegerParameter(
++                "weak_clusters", "WC",
++                "Stable program-cluster branch indices with at least one program voxel " +
++                "whose best route has conceptual capacity below 0.25.",
++                GH_ParamAccess.list);
++
+             pManager.AddTextParameter(
+                 "report", "R",
+@@
+             DA.SetDataList(4, CreateNetworkCurves(stack.VoxelGrid, result.NetworkEdges));
+             DA.SetDataTree(5, CreateLoadPathTree(stack.VoxelGrid, result.ClusterPaths));
+             DA.SetDataList(6, result.CandidateImportance);
+-            DA.SetData(7, BuildReport(stack, result, retainedFraction, iterations));
++            DA.SetDataList(7, result.VoxelCapacity);
++            DA.SetDataList(8, result.WeakClusterIndices);
++            DA.SetData(9, BuildReport(stack, result, retainedFraction, iterations));
+@@
+-                "grounded allocated={7} | unsupported allocated={8} | iteration budget={9}\n" +
++                "grounded allocated={7} | unsupported allocated={8} | weak clusters={9} | iteration budget={10}\n" +
+@@
+                 result.ProgramClusters.Count,
+                 groundedAllocated,
+                 result.UnsupportedIndices.Count,
++                result.WeakClusterIndices.Count,
+                 iterations);
+*** End Patch

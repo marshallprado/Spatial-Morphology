@@ -23,22 +23,24 @@ namespace Cumulus
         private readonly List<Box> _previewBoxes = new List<Box>();
         private readonly List<Color> _previewColors = new List<Color>();
         private bool _previewAsBoxes;
-
         // -- Constructor -------------------------------------------------------
         public AnalysisStackComponent()
             : base(
                 "AnalysisStack",
                 "AStack",
-                "Collects SpatialAnalysis objects, ProgramDefinitions, and ValueSets.\n" +
+                "Collects SpatialAnalysis objects and programs.\n" +
+                "Programs may be raw ProgramDefinition objects or weighted programs\n" +
+                "from the ValueSet component.\n" +
                 "Scores every voxel for every program and assigns each voxel to its\n" +
                 "best-matching program.\n\n" +
                 "Assignment methods:\n" +
                 "  0 = Highest score first (globally contested voxels resolved first)\n" +
                 "  1 = Round-robin (each program gets its best voxel in turn)\n" +
                 "  2 = Per program (program 0 fills first, then program 1, etc.)\n\n" +
-                "use_core:\n" +
-                "  If True and core_indices are connected, core voxels are extracted\n" +
-                "  before program assignment and output in a dedicated branch.\n\n" +
+                "core_indices:\n" +
+                "  When one or more valid indices are supplied, those voxels are\n" +
+                "  reserved as core before program assignment.\n" +
+                "  Leave this input empty to run without a core.\n\n" +
                 "show_unassigned:\n" +
                 "  If True, unassigned voxels appear in the last output branch.\n" +
                 "  If False, unassigned voxels are excluded from all outputs.\n\n" +
@@ -69,44 +71,44 @@ namespace Cumulus
             pManager.AddGenericParameter("voxel_grid", "VG",
                 "VoxelGrid object from the VoxelGrid component.",
                 GH_ParamAccess.item);
+
             pManager.AddGenericParameter("analysis", "A",
                 "List of SpatialAnalysis objects from SA components.\n" +
-                "Accepts flat list or DataTree — flattened automatically.",
+                "Accepts a flat list or DataTree; flattened automatically.",
                 GH_ParamAccess.tree);
+
             pManager.AddGenericParameter("programs", "P",
-                "List of ProgramDefinition objects.",
+                "ProgramDefinition objects, or ProgramWithValueSet objects " +
+                "from the ValueSet component.",
                 GH_ParamAccess.list);
-            pManager.AddGenericParameter("value_sets", "VS",
-                "Optional. List of ValueSet objects from ValueSet component.\n" +
-                "Matched to programs by ProgramName automatically.\n" +
-                "Accepts flat list or DataTree — flattened automatically.",
-                GH_ParamAccess.tree);
+
             pManager.AddBooleanParameter("show_all", "SA",
                 "True  = all voxels assigned to a program.\n" +
                 "False = clamp each program to its voxel_count.",
-                GH_ParamAccess.item, true);
+                GH_ParamAccess.item,
+                true);
+
             pManager.AddIntegerParameter("method", "M",
                 "Assignment method:\n" +
                 "  0 = Highest score first\n" +
                 "  1 = Round-robin\n" +
                 "  2 = Per program",
-                GH_ParamAccess.item, 0);
-            pManager.AddBooleanParameter("use_core", "UC",
-                "If True and core_indices are connected, core voxels are\n" +
-                "reserved before program assignment and placed in their own\n" +
-                "output branch {n_programs}.",
-                GH_ParamAccess.item, false);
-            pManager.AddIntegerParameter("core_indices", "CI",
-                "Optional. Core voxel indices from the CoreLocation component.\n" +
-                "Only used when use_core = True.",
-                GH_ParamAccess.list);
-            pManager.AddBooleanParameter("show_unassigned", "SU",
-                "True  = unassigned voxels output in last branch.\n" +
-                "False = unassigned voxels excluded from all outputs.",
-                GH_ParamAccess.item, true);
+                GH_ParamAccess.item,
+                0);
 
-            pManager[3].Optional = true;
-            pManager[7].Optional = true;
+            pManager.AddIntegerParameter("core_indices", "CI",
+                "Optional core voxel indices from CoreLocation.\n" +
+                "Supplying one or more valid indices enables core reservation.\n" +
+                "Leave empty to run without a core.",
+                GH_ParamAccess.list);
+
+            pManager.AddBooleanParameter("show_unassigned", "SU",
+                "True  = unassigned voxels output in the last branch.\n" +
+                "False = unassigned voxels excluded from all outputs.",
+                GH_ParamAccess.item,
+                true);
+
+            pManager[5].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -117,8 +119,8 @@ namespace Cumulus
             pManager.AddIntegerParameter("program_indices", "PI",
                 "DataTree of voxel indices per program.\n" +
                 "Branch {p}         = voxel indices for program p.\n" +
-                "Branch {n}         = core voxel indices (if use_core=True).\n" +
-                "Branch {n} or {n+1} = unassigned indices (if show_unassigned=True).",
+                "Branch {n}         = core voxel indices (if core_indices are supplied).\n" +
+                "Branch {n} or {n+1} = unassigned indices when show_unassigned=True.",
                 GH_ParamAccess.tree);
             pManager.AddGeometryParameter("voxels", "V",
                 "DataTree of voxel geometry parallel to program_indices.",
@@ -140,22 +142,18 @@ namespace Cumulus
             object? voxelGridObj = null;
             var analysisTree = new GH_Structure<IGH_Goo>();
             var programObjects = new List<object>();
-            var valueSetTree = new GH_Structure<IGH_Goo>();
             bool showAll = true;
             int method = 0;
-            bool useCore = false;
             var coreIdxInput = new List<int>();
             bool showUnassigned = true;
 
             if (!DA.GetData(0, ref voxelGridObj)) return;
             if (!DA.GetDataTree(1, out analysisTree)) return;
             if (!DA.GetDataList(2, programObjects)) return;
-            DA.GetDataTree(3, out valueSetTree);
-            DA.GetData(4, ref showAll);
-            DA.GetData(5, ref method);
-            DA.GetData(6, ref useCore);
-            DA.GetDataList(7, coreIdxInput);
-            DA.GetData(8, ref showUnassigned);
+            DA.GetData(3, ref showAll);
+            DA.GetData(4, ref method);
+            DA.GetDataList(5, coreIdxInput);
+            DA.GetData(6, ref showUnassigned);
 
             method = Math.Max(0, Math.Min(2, method));
 
@@ -187,29 +185,58 @@ namespace Cumulus
                 return;
             }
 
-            // -- Unwrap ProgramDefinition objects ------------------------------
+            // -- Unwrap raw and ValueSet-enriched program inputs ----------------
             var progList = new List<ProgramDefinition>();
+            var vsList = new List<ValueSet>();
+            var seenProgramNames = new HashSet<string>(StringComparer.Ordinal);
+
             foreach (var obj in programObjects)
             {
-                var pd = UnwrapProgram(obj);
-                if (pd != null) progList.Add(pd);
+                var coupledProgram = UnwrapProgramWithValueSet(obj);
+
+                if (coupledProgram != null)
+                {
+                    if (!seenProgramNames.Add(coupledProgram.Program.Name))
+                    {
+                        AddRuntimeMessage(
+                            GH_RuntimeMessageLevel.Warning,
+                            $"Ignored duplicate program '{coupledProgram.Program.Name}'.");
+                        continue;
+                    }
+
+                    progList.Add(coupledProgram.Program);
+                    vsList.Add(coupledProgram.ValueSet);
+                    continue;
+                }
+
+                var rawProgram = UnwrapProgram(obj);
+
+                if (rawProgram == null)
+                {
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Warning,
+                        "Ignored an input that is neither ProgramDefinition nor ProgramWithValueSet.");
+                    continue;
+                }
+
+                if (!seenProgramNames.Add(rawProgram.Name))
+                {
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Warning,
+                        $"Ignored duplicate program '{rawProgram.Name}'.");
+                    continue;
+                }
+
+                progList.Add(rawProgram);
             }
 
             if (progList.Count == 0)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
-                    "No ProgramDefinition objects found in 'programs'.");
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Error,
+                    "No ProgramDefinition or ProgramWithValueSet objects were found in P.");
                 return;
             }
-
-            // -- Unwrap ValueSet objects ---------------------------------------
-            var vsList = new List<ValueSet>();
-            foreach (var branch in valueSetTree.Branches)
-                foreach (var item in branch)
-                {
-                    var vs = UnwrapValueSet(item);
-                    if (vs != null) vsList.Add(vs);
-                }
 
             // -- Call the Core engine ------------------------------------------
             // ProgramSpec carries only what scoring needs. Colour stays here,
@@ -221,9 +248,22 @@ namespace Cumulus
                 .Select(p => new ProgramSpec(p.Name, p.VoxelCount))
                 .ToList();
 
-            var coreVoxels = useCore
-                ? coreIdxInput.Where(i => i >= 0 && i < n).ToList()
-                : new List<int>();
+            var invalidCoreCount = coreIdxInput.Count(index => index < 0 || index >= n);
+
+            var coreVoxels = coreIdxInput
+                .Where(index => index >= 0 && index < n)
+                .Distinct()
+                .OrderBy(index => index)
+                .ToList();
+
+            bool useCore = coreVoxels.Count > 0;
+
+            if (invalidCoreCount > 0)
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Warning,
+                    $"{invalidCoreCount} core index value(s) were outside the VoxelGrid and were ignored.");
+            }
 
             ScoringResult result;
             try
@@ -311,8 +351,7 @@ namespace Cumulus
                 result.Ranked);
 
             // -- Viewport preview ---------------------------------------------
-            // Match SAComponentBase point preview exactly when VoxelGrid uses
-            // points. Shader alpha remains in output S; preview is opaque.
+            // Shader alpha remains in output S; viewport colors are opaque.
             BuildPreviewData(
                 voxelGrid, result, progList, alphas,
                 useCore, coreSet, showUnassigned);
@@ -430,7 +469,6 @@ namespace Cumulus
                 return;
             }
 
-            // Identical to SAComponentBase's point preview.
             for (int i = 0; i < _previewPoints.Count && i < _previewColors.Count; i++)
             {
                 args.Display.DrawPoint(
@@ -489,6 +527,15 @@ namespace Cumulus
             catch { return null; }
         }
 
+        private static ProgramWithValueSet? UnwrapProgramWithValueSet(object obj)
+        {
+            var inner = obj is GH_ObjectWrapper wrapper
+                ? wrapper.Value
+                : obj;
+
+            return inner as ProgramWithValueSet;
+        }
+
         private static ProgramDefinition? UnwrapProgram(object obj)
         {
             var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
@@ -508,27 +555,6 @@ namespace Cumulus
                 int b = Convert.ToInt32(dc.B);
 
                 return new ProgramDefinition(nm!, Color.FromArgb(255, r, g, b), vc);
-            }
-            catch { return null; }
-        }
-
-        private static ValueSet? UnwrapValueSet(object obj)
-        {
-            var inner = obj is GH_ObjectWrapper w ? w.Value : obj;
-            if (inner == null) return null;
-            if (inner is ValueSet vs) return vs;
-
-            try
-            {
-                dynamic dyn = inner;
-                string? pnm = dyn.program_name?.ToString();
-                dynamic wts = dyn.weights;
-                if (string.IsNullOrWhiteSpace(pnm) || wts == null) return null;
-
-                var wd = new Dictionary<string, double>();
-                foreach (var kvp in wts)
-                    wd[kvp.Key.ToString()] = Convert.ToDouble(kvp.Value);
-                return new ValueSet(pnm!, wd);
             }
             catch { return null; }
         }

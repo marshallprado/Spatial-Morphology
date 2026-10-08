@@ -34,7 +34,16 @@ namespace Cumulus
         public override Guid ComponentGuid =>
             new Guid("E4421492-BDA1-4967-9241-6ADA1FD15C5F");
 
-        protected override Bitmap Icon => null;
+        protected override Bitmap Icon
+        {
+            get
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                var stream = assembly.GetManifestResourceStream(
+                    "Cumulus.Resources.Merge_24.png");
+                return stream != null ? new Bitmap(stream) : null;
+            }
+        }
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
