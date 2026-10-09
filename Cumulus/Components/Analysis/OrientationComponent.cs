@@ -91,7 +91,7 @@ namespace Cumulus
         // -- Ribbon placement --------------------------------------------------
         // Voxel-internal — reads only face-neighbour occupancy. The target
         // vector in mode 1 is a control input, not site context.
-        public override GH_Exposure Exposure => GH_Exposure.secondary;
+        public override GH_Exposure Exposure => GH_Exposure.hidden;
 
         // -- GUID — DO NOT CHANGE ----------------------------------------------
         // Kept from the SA_Orientation era so old .gh files keep working.

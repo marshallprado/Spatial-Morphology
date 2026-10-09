@@ -12,175 +12,95 @@ using Rhino.Geometry;
 namespace Cumulus
 {
     /// <summary>
-    /// Places vertical circulation cores in the voxel grid, either from
-    /// supplied curves or by dynamic-programming search, and scores every
-    /// voxel by how close it is to the nearest core.
+    /// Shared implementation for the focused manual and generative core components.
+    /// This abstract class is not a Grasshopper canvas component.
     /// </summary>
-    /// <remarks>
-    /// RENAMED in 4.0.0 — display name was "CoreLocation", now "Core Location".
-    /// The class name was already prefix-free. The ComponentGuid and the
-    /// default label "core" are both UNCHANGED, so saved definitions keep
-    /// resolving and no ValueSet matrix needs re-confirming.
-    ///
-    /// INVERT CONVENTION — READ THIS.
-    /// This component's default is the OPPOSITE of every other analysis
-    /// component in the set, and that is deliberate.
-    ///
-    ///   Everywhere else   invert = false gives the raw measurement.
-    ///                     invert = true reverses it.
-    ///
-    ///   Here              invert = false gives NEAR-CORE = HIGH, because the
-    ///                     raw distance is flipped internally by
-    ///                     (maxDist - d) before it leaves the component.
-    ///                     invert = true undoes that flip and gives plain
-    ///                     distance-from-core, so FAR-CORE = HIGH.
-    ///
-    /// The reason is that "closer to the core scores better" is the reading
-    /// almost everyone wants by default — a channel that rewards being far
-    /// from circulation is the unusual case, not the common one.
-    ///
-    /// This asymmetry was kept ON PURPOSE rather than normalised. Flipping the
-    /// default to match the other components would not error, would not warn,
-    /// and would not stop any saved definition from solving — it would simply
-    /// make every multiplier in every existing ValueSet matrix point the wrong
-    /// way, silently. A silent semantic inversion in saved files is a worse
-    /// outcome than an inconsistent default that is documented.
-    ///
-    /// So: invert = true here means "I want distance FROM the core", not
-    /// "reverse the raw measurement".
-    ///
-    /// Ribbon placement is secondary — voxel-internal. Cores are derived from
-    /// the grid's own geometry and, in generative mode, from analysis channels
-    /// that already exist. No external context geometry is read. The optional
-    /// core_curves input in manual mode is a control input, not site context.
-    /// </remarks>
-    public class CoreLocationComponent : SAComponentBase
+    public abstract class CoreLocationComponentBase : SAComponentBase
     {
-        // -- Constructor -------------------------------------------------------
-        public CoreLocationComponent()
-            : base(
-                "Core Location",
-                "Core",
-                "Places vertical circulation cores and scores every voxel by\n" +
-                "its closeness to the nearest one.\n\n" +
-                "Mode 0 — Manual:\n" +
-                "  Supply one or more curves. Each curve defines one core.\n" +
-                "  Voxels within 'radius' of a curve become core voxels.\n\n" +
-                "Mode 1 — Generative:\n" +
-                "  Dynamic programming searches for vertical core paths that\n" +
-                "  minimise total travel distance. Coverage is measured by BFS\n" +
-                "  along each floor, so a disconnected floor island always\n" +
-                "  gets its own core rather than being served across a gap.\n" +
-                "  Cores are added until every voxel is within max_distance,\n" +
-                "  or until the internal core limit is reached.\n\n" +
-                "  Connect analysis channels to bias WHERE cores want to sit.\n" +
-                "  Higher channel values attract cores. With nothing connected\n" +
-                "  the search uses travel distance alone.\n\n" +
-                "VALUE CONVENTION — this component is inverted by default:\n" +
-                "  invert = False (default): near core = HIGH, far = LOW.\n" +
-                "    This is the usual reading — proximity to circulation is\n" +
-                "    desirable, so it scores well.\n" +
-                "  invert = True: near core = LOW, far = HIGH.\n" +
-                "    This is plain distance-from-core. Use it when core\n" +
-                "    adjacency is undesirable — maximising quiet leasable area\n" +
-                "    away from lift lobbies and stair pressure.\n\n" +
-                "  Note this is the reverse of components like Proximity and\n" +
-                "  Surface Distance, where invert = False is the unmodified\n" +
-                "  measurement. Here the default is already flipped.\n\n" +
-                "The geometry outputs — core_indices, is_core, centerlines and\n" +
-                "footprints — are never affected by invert. Only the scalar\n" +
-                "value channel, its gradient and the voxel preview reverse.\n\n" +
-                "Version 4.0.0",
-                "Cumulus",
-                "2 | Analysis")
-        { }
+        private const int MaxCores = 20;
 
-        // -- Ribbon placement --------------------------------------------------
-        // Voxel-internal — derives cores from the grid and from existing
-        // channels. No external site geometry is consumed.
-        public override GH_Exposure Exposure => GH_Exposure.hidden;
+        /// <summary>
+        /// Selects the input contract and core-placement algorithm supplied by
+        /// the concrete component.
+        /// </summary>
+        protected abstract bool IsGenerative { get; }
 
-        // -- GUID — DO NOT CHANGE ----------------------------------------------
-        public override Guid ComponentGuid =>
-            new Guid("B8C9D0E1-F2A3-4567-BCDE-012345678916");
-
-        // -- Icon --------------------------------------------------------------
-        protected override Bitmap Icon
+        protected CoreLocationComponentBase(
+            string name,
+            string nickname,
+            string description)
+            : base(name, nickname, description, "Cumulus", "2 | Analysis")
         {
-            get
-            {
-                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                var stream = assembly.GetManifestResourceStream(
-                    "Cumulus.Resources.CoreLocation_24.png");
-                return stream != null ? new Bitmap(stream) : null;
-            }
         }
 
-        // -- Mode names --------------------------------------------------------
-        private static readonly string[] MODE_NAMES =
-        {
-            "Manual",
-            "Generative (DP + BFS)"
-        };
-
-        // -- Search limit ------------------------------------------------------
-        // Hard ceiling on generative core count. Without it, a grid that can
-        // never satisfy max_distance would loop until it ran out of voxels.
-        private const int MAX_CORES = 20;
-
-        // -- Parameters --------------------------------------------------------
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddGenericParameter("voxel_grid", "VG",
+            pManager.AddGenericParameter(
+                "voxel_grid", "VG",
                 "VoxelGrid object from the VoxelGrid component.",
                 GH_ParamAccess.item);
-            pManager.AddIntegerParameter("mode", "M",
-                "Placement mode:\n" +
-                "  0 = Manual      (use core_curves)\n" +
-                "  1 = Generative  (DP search for optimal core paths)",
-                GH_ParamAccess.item, 0);
-            pManager.AddCurveParameter("core_curves", "CC",
-                "Manual mode only.\n" +
-                "One or more curves defining core paths.\n" +
-                "Each curve defines one independent core.",
-                GH_ParamAccess.list);
-            pManager.AddGenericParameter("analysis", "A",
-                "Generative mode only. Optional.\n" +
-                "SpatialAnalysis channels used to bias core placement.\n" +
-                "Higher values attract cores. Each channel is normalised\n" +
-                "independently before use, so channels on different scales\n" +
-                "contribute evenly.\n" +
-                "With nothing connected, travel distance alone is used.",
-                GH_ParamAccess.list);
-            pManager.AddNumberParameter("radius", "R",
-                "Distance from the core path that counts as core.\n" +
-                "In model units. Default: 10.0.",
-                GH_ParamAccess.item, 10.0);
-            pManager.AddNumberParameter("max_distance", "MD",
-                "Maximum BFS floor travel distance from any voxel to its\n" +
-                "nearest core. Cores are added until this is satisfied.\n" +
-                "Measured along connected floor voxels, not straight line.\n" +
-                "Default: 100.0.",
-                GH_ParamAccess.item, 100.0);
-            pManager.AddIntegerParameter("min_island_size", "MI",
-                "Minimum connected voxels in a floor island for it to\n" +
-                "warrant its own core. Default: 4.",
-                GH_ParamAccess.item, 4);
-            pManager.AddBooleanParameter("invert", "I",
-                "If True, reverse the value channel so voxels NEAR a core\n" +
-                "score LOW and voxels FAR from a core score HIGH.\n\n" +
-                "Default false already reads near-core = high, because the\n" +
-                "distance is flipped internally. Setting this True therefore\n" +
-                "gives plain distance-from-core.\n\n" +
-                "Use when core adjacency is undesirable.\n" +
-                "Default: false.",
-                GH_ParamAccess.item, false);
-            pManager.AddTextParameter("label", "L",
-                "Channel name used by AnalysisStack. Default: 'core'.",
-                GH_ParamAccess.item, "core");
 
-            pManager[2].Optional = true;
-            pManager[3].Optional = true;
+            if (IsGenerative)
+            {
+                pManager.AddGenericParameter(
+                    "analysis", "A",
+                    "Optional SpatialAnalysis channels that attract generated core paths. " +
+                    "Higher normalized values are preferred.",
+                    GH_ParamAccess.list);
+
+                pManager.AddNumberParameter(
+                    "radius", "R",
+                    "Distance from the core path that counts as core, in model units.",
+                    GH_ParamAccess.item, 10.0);
+
+                pManager.AddNumberParameter(
+                    "max_distance", "MD",
+                    "Maximum face-connected floor-travel distance to a core. " +
+                    "Additional cores are generated until this target is reached " +
+                    "or the internal core limit is reached.",
+                    GH_ParamAccess.item, 100.0);
+
+                pManager.AddIntegerParameter(
+                    "min_island_size", "MI",
+                    "Minimum connected floor-island size considered during generation.",
+                    GH_ParamAccess.item, 4);
+
+                pManager.AddBooleanParameter(
+                    "invert", "I",
+                    "False: near core scores high. True: far from core scores high.",
+                    GH_ParamAccess.item, false);
+
+                pManager.AddTextParameter(
+                    "label", "L",
+                    "Analysis-channel label used by AnalysisStack.",
+                    GH_ParamAccess.item, "core");
+
+                pManager[1].Optional = true;
+            }
+            else
+            {
+                pManager.AddCurveParameter(
+                    "core_curves", "CC",
+                    "One or more curves defining manual core paths.",
+                    GH_ParamAccess.list);
+
+                pManager.AddNumberParameter(
+                    "radius", "R",
+                    "Distance from the core path that counts as core, in model units.",
+                    GH_ParamAccess.item, 10.0);
+
+                pManager.AddBooleanParameter(
+                    "invert", "I",
+                    "False: near core scores high. True: far from core scores high.",
+                    GH_ParamAccess.item, false);
+
+                pManager.AddTextParameter(
+                    "label", "L",
+                    "Analysis-channel label used by AnalysisStack.",
+                    GH_ParamAccess.item, "core");
+
+                pManager[1].Optional = true;
+            }
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -224,7 +144,6 @@ namespace Cumulus
         protected override void SolveInstance(IGH_DataAccess DA)
         {
             object voxelGridObj = null;
-            int mode = 0;
             var inputCurves = new List<Curve>();
             var analysisObjs = new List<object>();
             double radius = 10.0;
@@ -233,15 +152,25 @@ namespace Cumulus
             bool invert = false;
             string label = "core";
 
-            if (!DA.GetData(0, ref voxelGridObj)) return;
-            DA.GetData(1, ref mode);
-            DA.GetDataList(2, inputCurves);
-            DA.GetDataList(3, analysisObjs);
-            DA.GetData(4, ref radius);
-            DA.GetData(5, ref maxDistance);
-            DA.GetData(6, ref minIslandSize);
-            DA.GetData(7, ref invert);
-            DA.GetData(8, ref label);
+            if (!DA.GetData(0, ref voxelGridObj))
+                return;
+
+            if (IsGenerative)
+            {
+                DA.GetDataList(1, analysisObjs);
+                DA.GetData(2, ref radius);
+                DA.GetData(3, ref maxDistance);
+                DA.GetData(4, ref minIslandSize);
+                DA.GetData(5, ref invert);
+                DA.GetData(6, ref label);
+            }
+            else
+            {
+                DA.GetDataList(1, inputCurves);
+                DA.GetData(2, ref radius);
+                DA.GetData(3, ref invert);
+                DA.GetData(4, ref label);
+            }
 
             var voxelGrid = UnwrapVoxelGrid(voxelGridObj);
             if (voxelGrid == null)
@@ -254,7 +183,6 @@ namespace Cumulus
             string resolvedLabel = string.IsNullOrWhiteSpace(label)
                 ? "core" : label.Trim();
 
-            mode = Math.Max(0, Math.Min(1, mode));
             radius = Math.Max(0.01, radius);
             maxDistance = Math.Max(1.0, maxDistance);
             minIslandSize = Math.Max(1, minIslandSize);
@@ -296,13 +224,13 @@ namespace Cumulus
                 new List<List<(int floor, Point3d centroid, List<int> indices)>>();
             var coreVoxelSet = new HashSet<int>();
 
-            // -- Mode 0 — Manual -----------------------------------------------
-            if (mode == 0)
+            // -- Mode 0 â€” Manual -----------------------------------------------
+            if (!IsGenerative)
             {
                 if (inputCurves.Count == 0)
                 {
                     AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
-                        "Connect at least one curve to 'core_curves' in manual mode.");
+                        "Connect at least one curve to CC.");
                     return;
                 }
 
@@ -316,7 +244,7 @@ namespace Cumulus
                         "Check that the curves pass through the voxel grid and\n" +
                         "that radius is large enough for the voxel size.");
             }
-            // -- Mode 1 — Generative -------------------------------------------
+            // -- Mode 1 â€” Generative -------------------------------------------
             else
             {
                 int nUncovered = BuildGenerativeCores(
@@ -414,26 +342,28 @@ namespace Cumulus
             }
 
             string info = string.Format(
-                "Core Location | label='{0}' | mode={1} ({2}) | voxels={3}\n" +
-                "cores={4} | core_voxels={5} ({6:F1}% of grid)\n" +
-                "max_distance={7:F1} (BFS floor travel) | voxels_beyond={8}\n" +
-                "max_actual_dist={9:F2} | sa_channels={10}\n" +
-                "invert={11} — {12}\n" +
-                "output=[{13:F3} to {14:F3}]{15}",
+                "{0} | label='{1}' | voxels={2}\n" +
+                "cores={3} | core_voxels={4} ({5:F1}% of grid)\n" +
+                "max_distance={6:F1} (BFS floor travel) | voxels_beyond={7}\n" +
+                "max_actual_dist={8:F2} | sa_channels={9}\n" +
+                "invert={10} â€” {11}\n" +
+                "output=[{12:F3} to {13:F3}]{14}",
+                Name,
                 resolvedLabel,
-                mode, MODE_NAMES[mode],
                 n,
                 coreFloorData.Count,
                 coreVoxelSet.Count,
                 n > 0 ? (double)coreVoxelSet.Count / n * 100.0 : 0.0,
-                maxDistance, nBeyond,
+                maxDistance,
+                nBeyond,
                 maxDist,
                 saChannels.Count,
                 invert,
                 invert ? "far from core scores HIGH"
                        : "near core scores HIGH (default)",
-                outMin, outMax,
-                mode == 1
+                outMin,
+                outMax,
+                IsGenerative
                     ? string.Format("\nshift_penalty={0:F3} (auto-scaled)",
                         maxDistance / 10.0 / vs)
                     : "");
@@ -499,7 +429,7 @@ namespace Cumulus
             return result;
         }
 
-        // -- Mode 0 — cores from curves ----------------------------------------
+        // -- Mode 0 â€” cores from curves ----------------------------------------
         private void BuildManualCores(
             List<Curve> inputCurves,
             List<Point3d> centers,
@@ -539,7 +469,7 @@ namespace Cumulus
             }
         }
 
-        // -- Mode 1 — DP core search -------------------------------------------
+        // -- Mode 1 â€” DP core search -------------------------------------------
         // Returns the number of voxels still uncovered when the search stops.
         private int BuildGenerativeCores(
             int n, double vs, double radius, double maxDistance, int minIslandSize,
@@ -620,7 +550,7 @@ namespace Cumulus
             var uncovered = new HashSet<int>(Enumerable.Range(0, n));
             int coreIter = 0;
 
-            while (uncovered.Count > 0 && coreIter < MAX_CORES)
+            while (uncovered.Count > 0 && coreIter < MaxCores)
             {
                 coreIter++;
 
@@ -647,7 +577,7 @@ namespace Cumulus
 
                 foreach (var idx in voxelsByFloor[botFloor])
                 {
-                    // Covered voxels contribute no score — they are pure path.
+                    // Covered voxels contribute no score â€” they are pure path.
                     dp[idx] = uncovered.Contains(idx) ? blendedScore[idx] : 0.0;
                     parent[idx] = -1;
                 }
@@ -782,7 +712,7 @@ namespace Cumulus
                 uncovered.ExceptWith(coverage);
                 uncovered.ExceptWith(coreVoxelSet);
 
-                // No progress means the remainder is unreachable — adding more
+                // No progress means the remainder is unreachable â€” adding more
                 // cores would loop without ever satisfying max_distance.
                 if (uncovered.Count == before) break;
             }
@@ -862,7 +792,7 @@ namespace Cumulus
 
         // -- BFS coverage along each floor -------------------------------------
         // Walks outward from core voxels through connected floor voxels only.
-        // An island with no core voxel is never reached, which is the point —
+        // An island with no core voxel is never reached, which is the point â€”
         // straight-line distance would wrongly report it as served.
         private HashSet<int> ComputeFloorBFSCoverage(
             HashSet<int> coreVoxelSet,

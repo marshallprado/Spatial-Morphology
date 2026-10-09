@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 
 namespace Cumulus.Tests
@@ -7,7 +8,7 @@ namespace Cumulus.Tests
     public class StructureOptimizationEngineTests
     {
         [Test]
-        public void ConnectsFloatingProgramToGroundWithFullDownwardCapacity()
+        public void ConnectsFloatingProgramToGroundWithDownwardStructure()
         {
             var keys = new List<StructureVoxelKey>
             {
@@ -15,12 +16,16 @@ namespace Cumulus.Tests
                 new StructureVoxelKey(0, 0, 1),
                 new StructureVoxelKey(0, 0, 2)
             };
+
             var result = StructureOptimizationEngine.Run(
-                new StructureOptimizationRequest(keys, new[] { -1, -1, 0 }, new[] { 0 }, 0.25, 75));
+                new StructureOptimizationRequest(
+                    keys, new[] { -1, -1, 0 }, new[] { 0 }, 0.25, 75, 4));
 
             Assert.That(result.StructureIndices, Is.EquivalentTo(new[] { 0, 1 }));
             Assert.That(result.UnsupportedIndices, Is.Empty);
             Assert.That(result.VoxelCapacity[2], Is.EqualTo(1.0));
+            Assert.That(result.ClusterPaths[0], Has.Count.EqualTo(1));
+            Assert.That(result.ClusterPaths[0][0], Is.EqualTo(new[] { 2, 1, 0 }));
         }
 
         [Test]
@@ -31,61 +36,98 @@ namespace Cumulus.Tests
                 new StructureVoxelKey(0, 0, 1),
                 new StructureVoxelKey(0, 0, 2)
             };
+
             var result = StructureOptimizationEngine.Run(
-                new StructureOptimizationRequest(keys, new[] { -2, 0 }, new int[0], 0.25, 75));
+                new StructureOptimizationRequest(
+                    keys, new[] { -2, 0 }, new int[0], 0.25, 75, 4));
 
             Assert.That(result.StructureIndices, Is.Empty);
             Assert.That(result.UnsupportedIndices, Is.EquivalentTo(new[] { 0, 1 }));
         }
 
         [Test]
-        public void HorizontalTransferReducesProgramCapacity()
+        public void HighProgramPrefersNearbyGroundedCoreOverLongColumn()
         {
-            var keys = new List<StructureVoxelKey>
+            var keys = new List<StructureVoxelKey>();
+            var assignments = new List<int>();
+
+            // Grounded core column at x=0.
+            for (int z = 0; z <= 6; z++)
             {
-                new StructureVoxelKey(0, 0, 0),
-                new StructureVoxelKey(0, 0, 1),
-                new StructureVoxelKey(1, 0, 1)
-            };
-            var result = StructureOptimizationEngine.Run(
-                new StructureOptimizationRequest(keys, new[] { -1, -1, 0 }, new[] { 0 }, 0.25, 75));
+                keys.Add(new StructureVoxelKey(0, 0, z));
+                assignments.Add(-2);
+            }
 
-            Assert.That(result.VoxelCapacity[2], Is.EqualTo(0.25));
-            Assert.That(result.WeakClusterIndices, Is.EqualTo(new[] { 0 }));
-        }
+            // A high program voxel one cell beside the core, plus a possible
+            // direct unallocated column beneath it.
+            for (int z = 0; z < 6; z++)
+            {
+                keys.Add(new StructureVoxelKey(1, 0, z));
+                assignments.Add(-1);
+            }
 
-        [Test]
-        public void UpwardTransferHasLowerCapacityThanHorizontalTransfer()
-        {
-            // The source has no horizontal neighbour at its own elevation.
-            // It must move up, move horizontally twice, then descend through
-            // an offset grounded column.
-            var keys = new List<StructureVoxelKey>
-    {
-        new StructureVoxelKey(0, 0, 1), // 0: source
-        new StructureVoxelKey(0, 0, 2), // 1: upward step
-        new StructureVoxelKey(1, 0, 2), // 2: horizontal step
-        new StructureVoxelKey(2, 0, 2), // 3: horizontal step
-        new StructureVoxelKey(2, 0, 1), // 4: downward step
-        new StructureVoxelKey(2, 0, 0)  // 5: grounded voxel
-    };
+            int programIndex = keys.Count;
+            keys.Add(new StructureVoxelKey(1, 0, 6));
+            assignments.Add(0);
 
             var result = StructureOptimizationEngine.Run(
                 new StructureOptimizationRequest(
-                    keys,
-                    new[] { 0, -1, -1, -1, -1, -1 },
-                    new[] { 5 },
-                    0.25,
-                    75));
+                    keys, assignments, new[] { 0, 7 }, 0.25, 75, 4));
 
-            // Up × horizontal × horizontal × down × down:
-            // 0.125 × 0.25 × 0.25 × 1.0 × 1.0 = 0.0078125
-            Assert.That(result.VoxelCapacity[0], Is.EqualTo(0.0078125));
-            Assert.That(result.WeakClusterIndices, Is.EqualTo(new[] { 0 }));
+            var path = result.ClusterPaths[0][0];
+
+            Assert.That(result.UnsupportedIndices, Is.Empty);
+            Assert.That(path[0], Is.EqualTo(programIndex));
+            Assert.That(path, Does.Contain(6)); // nearest core at the same elevation
+            Assert.That(path[path.Count - 1], Is.EqualTo(0)); // complete route to ground
+            Assert.That(result.StructureIndices, Is.Empty);
         }
 
         [Test]
-        public void ReusedGroundedTrunkAccumulatesMoreImportance()
+        public void DoesNotSupportProgramFromAbove()
+        {
+            var keys = new List<StructureVoxelKey>
+            {
+                new StructureVoxelKey(0, 0, 1), // program source
+                new StructureVoxelKey(0, 0, 2), // core above source
+                new StructureVoxelKey(1, 0, 2),
+                new StructureVoxelKey(2, 0, 2),
+                new StructureVoxelKey(2, 0, 1),
+                new StructureVoxelKey(2, 0, 0)
+            };
+
+            var result = StructureOptimizationEngine.Run(
+                new StructureOptimizationRequest(
+                    keys, new[] { 0, -2, -1, -1, -1, -1 },
+                    new[] { 5 }, 0.25, 75, 4));
+
+            Assert.That(result.UnsupportedIndices, Does.Contain(0));
+            Assert.That(result.ClusterPaths[0], Is.Empty);
+        }
+
+        [Test]
+        public void EnforcesMaximumCantileverRun()
+        {
+            var keys = new List<StructureVoxelKey>
+            {
+                new StructureVoxelKey(0, 0, 2), // program
+                new StructureVoxelKey(1, 0, 2),
+                new StructureVoxelKey(2, 0, 2),
+                new StructureVoxelKey(2, 0, 1),
+                new StructureVoxelKey(2, 0, 0)
+            };
+
+            var result = StructureOptimizationEngine.Run(
+                new StructureOptimizationRequest(
+                    keys, new[] { 0, -1, -1, -1, -1 },
+                    new[] { 4 }, 0.25, 75, 1));
+
+            Assert.That(result.StructureIndices, Is.Empty);
+            Assert.That(result.UnsupportedIndices, Does.Contain(0));
+        }
+
+        [Test]
+        public void OutputsOnePathForEveryProgramVoxelInCluster()
         {
             var keys = new List<StructureVoxelKey>
             {
@@ -94,12 +136,14 @@ namespace Cumulus.Tests
                 new StructureVoxelKey(0, 0, 2),
                 new StructureVoxelKey(1, 0, 2)
             };
-            var result = StructureOptimizationEngine.Run(
-                new StructureOptimizationRequest(keys, new[] { -1, -1, 0, 1 }, new[] { 0 }, 0.25, 75));
 
-            Assert.That(result.UnsupportedIndices, Is.Empty);
-            Assert.That(result.CandidateImportance[1], Is.GreaterThan(0.0));
-            Assert.That(result.CandidateImportance[0], Is.GreaterThan(0.0));
+            var result = StructureOptimizationEngine.Run(
+                new StructureOptimizationRequest(
+                    keys, new[] { -1, -1, 0, 0 }, new[] { 0 }, 0.25, 75, 4));
+
+            Assert.That(result.ClusterPaths, Has.Count.EqualTo(1));
+            Assert.That(result.ClusterPaths[0], Has.Count.EqualTo(2));
+            Assert.That(result.ClusterPaths[0].All(path => path.Last() == 0), Is.True);
         }
     }
 }

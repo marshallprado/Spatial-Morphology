@@ -72,7 +72,7 @@ namespace Cumulus
 
         // -- Ribbon placement --------------------------------------------------
         // Voxel-internal analysis — reads only the construction plane.
-        public override GH_Exposure Exposure => GH_Exposure.secondary;
+        public override GH_Exposure Exposure => GH_Exposure.hidden;
 
         // -- GUID — DO NOT CHANGE ----------------------------------------------
         // Kept from the SA_FloorLevel era so old .gh files keep working.

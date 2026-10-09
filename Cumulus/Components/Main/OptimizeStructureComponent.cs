@@ -35,7 +35,18 @@ namespace Cumulus
         public override Guid ComponentGuid =>
             new Guid("7F5D27A6-9B14-4E55-A583-6C2A67E543C8");
 
-        protected override Bitmap Icon => null;
+        protected override Bitmap Icon
+        {
+            get
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+
+                using var stream = assembly.GetManifestResourceStream(
+                    "Cumulus.Resources.Structure_24.png");
+
+                return stream != null ? new Bitmap(stream) : null!;
+            }
+        }
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
@@ -53,12 +64,20 @@ namespace Cumulus
 
             pManager.AddIntegerParameter(
                 "maximum_iterations", "I",
-                "Reserved optimization iteration budget. Default is 75.",
+                "Reserved routing iteration budget. Default is 75.",
                 GH_ParamAccess.item,
                 75);
 
+            pManager.AddIntegerParameter(
+                "max_cantilever_voxels", "MC",
+                "Maximum consecutive horizontal voxel steps allowed before a " +
+                "downward step is required. Upward support is never permitted.",
+                GH_ParamAccess.item,
+                4);
+
             pManager[1].Optional = true;
             pManager[2].Optional = true;
+            pManager[3].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -92,8 +111,9 @@ namespace Cumulus
 
             pManager.AddCurveParameter(
                 "load_paths", "LP",
-                "One simplified voxel-centre polyline per face-connected program cluster. " +
-                "Data-tree branches follow stable program/cluster order.",
+                "All valid program-voxel-to-ground polylines, grouped by " +
+                "face-connected program cluster. Data-tree branches follow stable " +
+                "program/cluster order.",
                 GH_ParamAccess.tree);
 
             pManager.AddNumberParameter(
@@ -113,12 +133,14 @@ namespace Cumulus
             object stackObject = null;
             double retainedFraction = 0.25;
             int iterations = 75;
+            int maximumCantilever = 4;
 
             if (!DA.GetData(0, ref stackObject))
                 return;
 
             DA.GetData(1, ref retainedFraction);
             DA.GetData(2, ref iterations);
+            DA.GetData(3, ref maximumCantilever);
 
             var stack = UnwrapStack(stackObject);
             if (stack == null)
@@ -150,6 +172,7 @@ namespace Cumulus
 
             retainedFraction = Math.Max(0.0, Math.Min(1.0, retainedFraction));
             iterations = Math.Max(1, iterations);
+            maximumCantilever = Math.Max(0, maximumCantilever);
 
             var keys = stack.VoxelGrid.FilledKeys
                 .Select(key => new StructureVoxelKey(key.Item1, key.Item2, key.Item3))
@@ -174,7 +197,8 @@ namespace Cumulus
                         stack.ProgramIndices,
                         groundIndices,
                         retainedFraction,
-                        iterations));
+                        iterations,
+                        maximumCantilever));
             }
             catch (Exception exception)
             {
@@ -211,7 +235,8 @@ namespace Cumulus
             DA.SetDataList(4, CreateNetworkCurves(stack.VoxelGrid, result.NetworkEdges));
             DA.SetDataTree(5, CreateLoadPathTree(stack.VoxelGrid, result.ClusterPaths));
             DA.SetDataList(6, result.CandidateImportance);
-            DA.SetData(7, BuildReport(stack, result, retainedFraction, iterations));
+            DA.SetData(7, BuildReport(
+                stack, result, retainedFraction, iterations, maximumCantilever));
         }
 
         private static AnalysisStackData UnwrapStack(object value)
@@ -301,24 +326,28 @@ namespace Cumulus
         }
 
         private static GH_Structure<GH_Curve> CreateLoadPathTree(
-            VoxelGrid grid, IReadOnlyList<IReadOnlyList<int>> paths)
+            VoxelGrid grid,
+            IReadOnlyList<IReadOnlyList<IReadOnlyList<int>>> clusterPaths)
         {
             var tree = new GH_Structure<GH_Curve>();
 
-            for (int branchIndex = 0; branchIndex < paths.Count; branchIndex++)
+            for (int clusterIndex = 0; clusterIndex < clusterPaths.Count; clusterIndex++)
             {
-                var path = new GH_Path(branchIndex);
+                var path = new GH_Path(clusterIndex);
                 tree.EnsurePath(path);
 
-                if (paths[branchIndex].Count < 2)
-                    continue;
+                foreach (var voxelPath in clusterPaths[clusterIndex])
+                {
+                    if (voxelPath.Count < 2)
+                        continue;
 
-                var points = paths[branchIndex]
-                    .Select(index => grid.KeyToCenter(grid.FilledKeys[index]))
-                    .ToList();
+                    var points = voxelPath
+                        .Select(index => grid.KeyToCenter(grid.FilledKeys[index]))
+                        .ToList();
 
-                var simplified = SimplifyVoxelPolyline(points);
-                tree.Append(new GH_Curve(new PolylineCurve(simplified)), path);
+                    var simplified = SimplifyVoxelPolyline(points);
+                    tree.Append(new GH_Curve(new PolylineCurve(simplified)), path);
+                }
             }
 
             return tree;
@@ -352,7 +381,8 @@ namespace Cumulus
             AnalysisStackData stack,
             StructureOptimizationResult result,
             double retainedFraction,
-            int iterations)
+            int iterations,
+            int maximumCantilever)
         {
             int allocated = stack.ProgramIndices.Count(index => index != -1);
             int groundedAllocated = allocated - result.UnsupportedIndices.Count;
@@ -361,9 +391,11 @@ namespace Cumulus
                 "Optimize Structure | allocated={0} | unallocated candidates={1} | " +
                 "target fraction={2:P0} ({3}) | retained structure={4} | " +
                 "ground contacts={5} | program clusters={6} | " +
-                "grounded allocated={7} | unsupported allocated={8} | iteration budget={9}\n" +
-                "Ground is the VoxelGrid construction plane. Program/core voxels are " +
-                "load-transmissive; only unallocated voxels become Structure. " +
+                "grounded allocated={7} | unsupported allocated={8} | iteration budget={9} | " +
+                "max cantilever={10}\n" +
+                "Ground is the VoxelGrid construction plane. Programs attach to the " +
+                "nearest valid grounded core/structure network or ground using only " +
+                "downward and cantilever-limited horizontal moves. " +
                 "This is an architectural connectivity model, not engineering analysis.",
                 allocated,
                 result.CandidateCount,
@@ -374,7 +406,8 @@ namespace Cumulus
                 result.ProgramClusters.Count,
                 groundedAllocated,
                 result.UnsupportedIndices.Count,
-                iterations);
+                iterations,
+                maximumCantilever);
         }
     }
 }

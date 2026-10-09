@@ -76,7 +76,7 @@ namespace Cumulus
 
         // -- Ribbon placement --------------------------------------------------
         // Contextual analysis — takes external obstacle geometry as input.
-        public override GH_Exposure Exposure => GH_Exposure.primary;
+        public override GH_Exposure Exposure => GH_Exposure.hidden;
 
         // -- GUID — DO NOT CHANGE ----------------------------------------------
         // Kept from the SA_Isovist era so old .gh files keep working.

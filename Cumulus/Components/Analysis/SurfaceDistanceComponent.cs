@@ -56,25 +56,7 @@ namespace Cumulus
             : base(
                 "Surface Distance",
                 "SurfDist",
-                "Distance from the surface shell, measured outward by BFS.\n\n" +
-                "Mode 0 — Depth (hops):\n" +
-                "  0 = surface layer\n" +
-                "  N = N voxel steps from the nearest surface voxel\n" +
-                "  Integer and unitless. Does not change with voxel size.\n" +
-                "  Use for discrete peel layers — 'second ring in'.\n\n" +
-                "Mode 1 — Metric (model units):\n" +
-                "  0.0 = voxel is on the surface shell\n" +
-                "  N   = N model units from the originating surface centre\n" +
-                "  Scales with voxel size. Use when the threshold is\n" +
-                "  dimensional — daylight penetration, distance to facade.\n\n" +
-                "The two modes are proportional in convex regions but diverge\n" +
-                "around concavities, because Metric measures a straight line\n" +
-                "back to the seed voxel rather than the path length walked.\n\n" +
-                "This component measures distance to the voxel SHELL. For\n" +
-                "distance to arbitrary context geometry, use Proximity.\n\n" +
-                "invert = False (default): surface = low value, interior = high\n" +
-                "invert = True: surface = high value, interior = low\n\n" +
-                "Normalization is handled downstream by AnalysisStack.\n\n" +
+                "Legacy component. Use Surface Depth or Surface Distance instead." +
                 "Version 3.1.0",
                 "Cumulus",
                 "2 | Analysis")
@@ -82,7 +64,7 @@ namespace Cumulus
 
         // -- Ribbon placement --------------------------------------------------
         // Voxel-internal analysis — no context geometry input.
-        public override GH_Exposure Exposure => GH_Exposure.secondary;
+        public override GH_Exposure Exposure => GH_Exposure.hidden;
 
         // -- GUID — DO NOT CHANGE ----------------------------------------------
         // SA_Depth's original GUID, kept so its saved definitions keep working.

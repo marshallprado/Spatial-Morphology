@@ -57,42 +57,58 @@
 	     The SA_* entries from the pre-rename era have been removed. -->
 	<ItemGroup>
 		<None Remove="Resources\AnalysisStack_24.png" />
+		<None Remove="Resources\Commercial_24.png" />
 		<None Remove="Resources\Composite_24.png" />
 		<None Remove="Resources\CoreLocation_24.png" />
 		<None Remove="Resources\FloorLevel_24.png" />
+		<None Remove="Resources\GenerateCore_24.png" />
+		<None Remove="Resources\HorizonView_24.png" />
 		<None Remove="Resources\Merge_24.png" />
 		<None Remove="Resources\NeighborCount_24.png" />
 		<None Remove="Resources\NormalizeValues_24.png" />
 		<None Remove="Resources\Orientation_24.png" />
 		<None Remove="Resources\ProgramDefinition_24.png" />
 		<None Remove="Resources\Proximity_24.png" />
+		<None Remove="Resources\RealEstate_24.png" />
+		<None Remove="Resources\SkyView_24.png" />
 		<None Remove="Resources\Solar_24.png" />
 		<None Remove="Resources\SunVectors_24.png" />
+		<None Remove="Resources\SurfaceAlignment_24.png" />
+		<None Remove="Resources\SurfaceDepth_24.png" />
 		<None Remove="Resources\SurfaceDistance_24.png" />
 		<None Remove="Resources\ValueSet_24.png" />
 		<None Remove="Resources\View_24.png" />
 		<None Remove="Resources\Visibility_24.png" />
 		<None Remove="Resources\VoxelGrid_24.png" />
+		<None Remove="Resources\Walkup_24.png" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<EmbeddedResource Include="Resources\AnalysisStack_24.png" />
+		<EmbeddedResource Include="Resources\Commercial_24.png" />
 		<EmbeddedResource Include="Resources\Composite_24.png" />
 		<EmbeddedResource Include="Resources\CoreLocation_24.png" />
 		<EmbeddedResource Include="Resources\FloorLevel_24.png" />
+		<EmbeddedResource Include="Resources\GenerateCore_24.png" />
+		<EmbeddedResource Include="Resources\HorizonView_24.png" />
 		<EmbeddedResource Include="Resources\Merge_24.png" />
 		<EmbeddedResource Include="Resources\NeighborCount_24.png" />
 		<EmbeddedResource Include="Resources\NormalizeValues_24.png" />
 		<EmbeddedResource Include="Resources\Orientation_24.png" />
 		<EmbeddedResource Include="Resources\ProgramDefinition_24.png" />
 		<EmbeddedResource Include="Resources\Proximity_24.png" />
+		<EmbeddedResource Include="Resources\RealEstate_24.png" />
+		<EmbeddedResource Include="Resources\SkyView_24.png" />
 		<EmbeddedResource Include="Resources\Solar_24.png" />
+		<EmbeddedResource Include="Resources\Structure_24.png" />
 		<EmbeddedResource Include="Resources\SunVectors_24.png" />
+		<EmbeddedResource Include="Resources\SurfaceAlignment_24.png" />
+		<EmbeddedResource Include="Resources\SurfaceDepth_24.png" />
 		<EmbeddedResource Include="Resources\SurfaceDistance_24.png" />
 		<EmbeddedResource Include="Resources\ValueSet_24.png" />
-		<EmbeddedResource Include="Resources\View_24.png" />
 		<EmbeddedResource Include="Resources\Visibility_24.png" />
 		<EmbeddedResource Include="Resources\VoxelGrid_24.png" />
+		<EmbeddedResource Include="Resources\Walkup_24.png" />
 	</ItemGroup>
 
 	<ItemGroup>
