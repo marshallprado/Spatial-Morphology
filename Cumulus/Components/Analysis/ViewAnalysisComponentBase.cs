@@ -84,12 +84,16 @@ namespace Cumulus
             pManager.AddTextParameter(
                 "label",
                 "L",
-                "Analysis-channel label used by AnalysisStack.\n" +
-                $"Default: '{_defaultLabel}'.",
+                "Optional analysis-channel label used by AnalysisStack.\n" +
+                "Leave unconnected to use the default label: " + _defaultLabel + ".",
                 GH_ParamAccess.item,
                 _defaultLabel);
 
+            pManager[5].Optional = true;
+
+            // Obstacles and Label may be left unconnected.
             pManager[1].Optional = true;
+            pManager[5].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -142,7 +146,18 @@ namespace Cumulus
             DA.GetData(2, ref sampleCount);
             DA.GetData(3, ref radius);
             DA.GetData(4, ref invert);
-            DA.GetData(5, ref label);
+
+            string suppliedLabel = string.Empty;
+
+            if (DA.GetData(5, ref suppliedLabel) &&
+                !string.IsNullOrWhiteSpace(suppliedLabel))
+            {
+                label = suppliedLabel.Trim();
+            }
+
+            string resolvedLabel = string.IsNullOrWhiteSpace(label)
+                ? _defaultLabel
+                : label.Trim();
 
             var voxelGrid = UnwrapVoxelGrid(voxelGridObject);
             if (voxelGrid == null)
@@ -157,9 +172,6 @@ namespace Cumulus
             sampleCount = Math.Max(4, sampleCount);
             radius = Math.Max(1.0, radius);
 
-            string resolvedLabel = string.IsNullOrWhiteSpace(label)
-                ? _defaultLabel
-                : label.Trim();
 
             Mesh? obstacleMesh = BuildObstacleMesh(obstacleMeshes);
 
@@ -232,6 +244,7 @@ namespace Cumulus
             var outputValues = invert
                 ? InvertValues(rawValues)
                 : rawValues;
+
 
             var analysis = new SpatialAnalysis(resolvedLabel, outputValues);
 

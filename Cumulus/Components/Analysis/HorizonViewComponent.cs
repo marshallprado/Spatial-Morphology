@@ -1,4 +1,5 @@
 ﻿// -*- coding: utf-8 -*-
+using Grasshopper.Kernel;
 using System;
 using System.Drawing;
 
@@ -23,6 +24,8 @@ namespace Cumulus
                 72)
         {
         }
+
+        public override GH_Exposure Exposure => GH_Exposure.primary;
 
         public override Guid ComponentGuid =>
             new Guid("0FA76FD2-6F2C-49A3-AB4E-4B89DBAF8487");

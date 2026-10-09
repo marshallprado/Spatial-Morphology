@@ -1,4 +1,5 @@
 // -*- coding: utf-8 -*-
+using Grasshopper.Kernel;
 using System;
 using System.Drawing;
 
@@ -23,7 +24,7 @@ namespace Cumulus
                 "surface_depth")
         {
         }
-
+        public override GH_Exposure Exposure => GH_Exposure.secondary;
         /// <summary>
         /// Do not change this GUID after the component has been released.
         /// </summary>

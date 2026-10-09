@@ -123,15 +123,16 @@ namespace Cumulus
                 "channel. The gradient and voxel preview are reversed to match.\n" +
                 "Default: false.",
                 GH_ParamAccess.item, false);
+            pManager.AddIntegerParameter("mode", "MD",
+            "0 = Weighted sum\n" +
+            "1 = Minimum (worst channel wins)\n" +
+            "2 = Maximum (best channel wins)",
+            GH_ParamAccess.item, 0); 
             pManager.AddTextParameter("label", "L",
                 "Label for the resulting channel, e.g. 'privacy'.\n" +
                 "Must be unique across all channels reaching one AnalysisStack.",
                 GH_ParamAccess.item, "composite");
-            pManager.AddIntegerParameter("mode", "MD",
-                "0 = Weighted sum\n" +
-                "1 = Minimum (worst channel wins)\n" +
-                "2 = Maximum (best channel wins)",
-                GH_ParamAccess.item, 0);
+        
 
             pManager[0].Optional = true;
             pManager[2].Optional = true;
@@ -177,8 +178,9 @@ namespace Cumulus
             if (!DA.GetDataList(1, analysisObjects)) return;
             DA.GetDataList(2, multipliers);
             DA.GetData(3, ref invert);
-            DA.GetData(4, ref label);
-            DA.GetData(5, ref mode);
+            DA.GetData(4, ref mode); 
+            DA.GetData(5, ref label);
+            
 
             mode = Math.Max(0, Math.Min(2, mode));
 

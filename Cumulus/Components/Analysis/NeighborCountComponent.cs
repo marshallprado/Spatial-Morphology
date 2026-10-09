@@ -42,6 +42,8 @@ namespace Cumulus
                 "2 | Analysis")
         { }
 
+       
+
         // -- GUID — DO NOT CHANGE ----------------------------------------------
         // Kept from the SA_Adjacency era so old .gh files keep working.
         public override Guid ComponentGuid =>

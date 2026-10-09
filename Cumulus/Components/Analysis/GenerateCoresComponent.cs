@@ -23,7 +23,7 @@ namespace Cumulus
                 "The scalar output defaults to near core = high.")
         {
         }
-        public override GH_Exposure Exposure => GH_Exposure.secondary;
+        public override GH_Exposure Exposure => GH_Exposure.tertiary;
         public override Guid ComponentGuid =>
             new Guid("37A7B130-31E7-4B3F-8E81-3A044C51CBFB");
 

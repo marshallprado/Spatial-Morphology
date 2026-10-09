@@ -69,6 +69,9 @@ namespace Cumulus
                     _defaultLabel + "'.",
                 GH_ParamAccess.item,
                 _defaultLabel);
+
+            // L is optional. If it is not wired, SolveInstance uses _defaultLabel.
+            pManager[3].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -122,7 +125,14 @@ namespace Cumulus
 
             DA.GetData(1, ref floorHeight);
             DA.GetData(2, ref invert);
-            DA.GetData(3, ref label);
+
+            // L is optional. Leave label as _defaultLabel when no value is supplied.
+            string suppliedLabel = string.Empty;
+            if (DA.GetData(3, ref suppliedLabel) &&
+                !string.IsNullOrWhiteSpace(suppliedLabel))
+            {
+                label = suppliedLabel.Trim();
+            }
 
             var voxelGrid = UnwrapVoxelGrid(voxelGridObject);
             if (voxelGrid == null)

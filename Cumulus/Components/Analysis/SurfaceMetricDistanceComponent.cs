@@ -1,4 +1,5 @@
 // -*- coding: utf-8 -*-
+using Grasshopper.Kernel;
 using System;
 using System.Drawing;
 
@@ -20,6 +21,7 @@ namespace Cumulus
                 "surface_distance")
         {
         }
+        public override GH_Exposure Exposure => GH_Exposure.secondary;
 
         public override Guid ComponentGuid =>
             new Guid("7B14EC0B-491A-4A77-8A75-0A7E3C62F4A9");

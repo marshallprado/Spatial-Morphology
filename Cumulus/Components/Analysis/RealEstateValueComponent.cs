@@ -1,4 +1,5 @@
 // -*- coding: utf-8 -*-
+using Grasshopper.Kernel;
 using System;
 using System.Drawing;
 
@@ -23,6 +24,8 @@ namespace Cumulus
                 "real_estate_value")
         {
         }
+
+        public override GH_Exposure Exposure => GH_Exposure.tertiary;
 
         public override Guid ComponentGuid =>
             new Guid("AF94C198-65D5-4A25-8654-B0C0D45236A7");

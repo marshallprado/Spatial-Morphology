@@ -1,4 +1,5 @@
 // -*- coding: utf-8 -*-
+using Grasshopper.Kernel;
 using System;
 using System.Drawing;
 
@@ -21,6 +22,8 @@ namespace Cumulus
                 "walkup_value")
         {
         }
+
+        public override GH_Exposure Exposure => GH_Exposure.tertiary;
 
         public override Guid ComponentGuid =>
             new Guid("37DA090B-C1C2-4A70-9F5F-7E2EE145E713");
