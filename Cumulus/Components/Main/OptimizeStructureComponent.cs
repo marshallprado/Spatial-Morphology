@@ -29,7 +29,7 @@ namespace Cumulus
                 "This is a topology-like architectural design tool, not a " +
                 "structural-engineering or finite-element calculation.",
                 "Cumulus",
-                "4 | Post Process")
+                "3 | Main")
         {
         }
 

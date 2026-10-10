@@ -28,7 +28,7 @@ namespace Cumulus
                 "voxels are merged as a separate group and unassigned voxels " +
                 "remain excluded.",
                 "Cumulus",
-                "4 | Post Process")
+                "3 | Main")
         {
         }
 
