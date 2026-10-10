@@ -6,7 +6,7 @@ using System.Drawing;
 using Grasshopper.Kernel;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Components.Legacy
 {
     /// <summary>
     /// Assigns each voxel a value derived from its floor level relative to the

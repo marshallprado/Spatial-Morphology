@@ -37,6 +37,11 @@
 	<Target Name="FailOnWindowsOnlyUI" BeforeTargets="Build" Condition="'$(UseWPF)' == 'true' or '$(UseWindowsForms)' == 'true'">
 		<Error Text="UseWPF/UseWindowsForms are not permitted: they break macOS. Use Eto.Forms." />
 	</Target>
+	<ItemGroup>
+	  <Compile Remove="Components\Display\**" />
+	  <EmbeddedResource Remove="Components\Display\**" />
+	  <None Remove="Components\Display\**" />
+	</ItemGroup>
 
 	<!-- ============ Package references ============================
 	     ExcludeAssets="runtime" + PrivateAssets="all" are BOTH required.
@@ -109,10 +114,6 @@
 		<EmbeddedResource Include="Resources\Visibility_24.png" />
 		<EmbeddedResource Include="Resources\VoxelGrid_24.png" />
 		<EmbeddedResource Include="Resources\Walkup_24.png" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<Folder Include="Components\Display\" />
 	</ItemGroup>
 
 	<!-- Files that must travel together into the Libraries folder.

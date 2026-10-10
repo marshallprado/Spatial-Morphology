@@ -1,216 +1,525 @@
 // -*- coding: utf-8 -*-
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Globalization;
 using Eto.Drawing;
 using Eto.Forms;
 
 namespace Cumulus.UI
 {
     /// <summary>
-    /// Cross-platform (Eto.Forms) replacement for the WinForms DataGridView
-    /// weight-matrix editor. Runs on Rhino 8 for both Windows and macOS.
+    /// Cross-platform Eto matrix editor for ValueSet weights.
+    /// Each weight has a numeric field and a slider in the range [-1.00, 1.00].
+    /// Randomize and Jitter operations are seeded for repeatability.
     /// </summary>
-    /// <remarks>
-    /// Public contract is unchanged from the WinForms version: construct with
-    /// (programNames, channelLabels, existingWeights), show it modally, then
-    /// check <see cref="Confirmed"/> and read <see cref="GetWeights"/>.
-    /// <para>
-    /// The per-cell heat-map colouring from the WinForms version has been
-    /// removed deliberately. Eto has no independently addressable cells, so it
-    /// had to be produced from the <c>CellFormatting</c> event, which runs
-    /// inside the platform draw loop — an exception there terminates the host
-    /// process (Rhino) instead of surfacing as a managed error. The sign of a
-    /// weight is still readable because values are formatted with an explicit
-    /// +/- prefix.
-    /// </para>
-    /// </remarks>
     public class ValueSetMatrixForm : Dialog
     {
-        // -- Private fields ----------------------------------------------------
+        private const double MinimumWeight = -1.0;
+        private const double MaximumWeight = 1.0;
+        private const double WeightStep = 0.05;
+
         private readonly List<string> _programNames;
         private readonly List<string> _channelLabels;
-        private readonly ObservableCollection<WeightRow> _rows;
+        private readonly double[,] _initialWeights;
+        private readonly double[,] _weights;
+        private readonly Action<double[,]>? _liveUpdate;
+        private readonly List<WeightCellEditor> _editors =
+            new List<WeightCellEditor>();
+
+        private readonly CheckBox _liveUpdateCheckBox;
+        private readonly NumericStepper _seedStepper;
+        private readonly NumericStepper _jitterStepper;
+        private readonly DropDown _programSelector;
+        private readonly Label _statusLabel;
         private bool _confirmed;
+        private bool _suppressLiveUpdate;
 
-        /// <summary>One grid row: a program name plus its channel multipliers.</summary>
-        private sealed class WeightRow
+        private sealed class WeightCellEditor
         {
-            public string Program { get; }
+            private readonly double[,] _weights;
+            private readonly int _programIndex;
+            private readonly int _channelIndex;
+            private readonly Action _changed;
+            private bool _updating;
 
-            /// <summary>Multipliers for this program, indexed by channel.</summary>
-            public double[] Values { get; }
+            public NumericStepper Numeric { get; }
+            public Slider Slider { get; }
 
-            public WeightRow(string program, double[] values)
+            public WeightCellEditor(
+                double[,] weights,
+                int programIndex,
+                int channelIndex,
+                Action changed)
             {
-                Program = program;
-                Values = values;
-            }
+                _weights = weights;
+                _programIndex = programIndex;
+                _channelIndex = channelIndex;
+                _changed = changed;
 
-            public string Get(int channel)
-            {
-                if (channel < 0 || channel >= Values.Length) return string.Empty;
-                return Values[channel].ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture);
-            }
-
-            public void Set(int channel, string? text)
-            {
-                if (channel < 0 || channel >= Values.Length) return;
-                if (string.IsNullOrWhiteSpace(text)) return;
-
-                if (double.TryParse(text.Trim(),
-                                    NumberStyles.Float,
-                                    CultureInfo.InvariantCulture,
-                                    out double parsed))
+                Numeric = new NumericStepper
                 {
-                    Values[channel] = parsed;
-                }
-                // Unparseable input is ignored, which replaces the WinForms
-                // DataError handler. The grid re-reads the getter and the old
-                // value reappears.
+                    MinValue = MinimumWeight,
+                    MaxValue = MaximumWeight,
+                    Increment = WeightStep,
+                    DecimalPlaces = 2,
+                    Width = 78,
+                    Value = Clamp(weights[programIndex, channelIndex])
+                };
+
+                Slider = new Slider
+                {
+                    MinValue = -20,
+                    MaxValue = 20,
+                    Value = ToSliderValue(weights[programIndex, channelIndex]),
+                    Width = 110
+                };
+
+                Numeric.ValueChanged += OnNumericValueChanged;
+                Slider.ValueChanged += OnSliderValueChanged;
+            }
+
+            public Control CreateControl()
+            {
+                return new StackLayout
+                {
+                    Orientation = Orientation.Vertical,
+                    Spacing = 2,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Items =
+                    {
+                        Numeric,
+                        Slider
+                    }
+                };
+            }
+
+            public void SetValue(double value)
+            {
+                value = Quantize(value);
+
+                _updating = true;
+                _weights[_programIndex, _channelIndex] = value;
+                Numeric.Value = value;
+                Slider.Value = ToSliderValue(value);
+                _updating = false;
+            }
+
+            private void OnNumericValueChanged(object? sender, EventArgs e)
+            {
+                if (_updating)
+                    return;
+
+                SetValue(Numeric.Value);
+                _changed();
+            }
+
+            private void OnSliderValueChanged(object? sender, EventArgs e)
+            {
+                if (_updating)
+                    return;
+
+                SetValue(FromSliderValue(Slider.Value));
+                _changed();
+            }
+
+            private static int ToSliderValue(double value)
+            {
+                return (int)Math.Round(
+                    Clamp(value) / WeightStep,
+                    MidpointRounding.AwayFromZero);
+            }
+
+            private static double FromSliderValue(int value)
+            {
+                return Quantize(value * WeightStep);
             }
         }
 
-        // -- Constructor -------------------------------------------------------
-        /// <summary>Creates the editor.</summary>
-        /// <param name="programNames">Row labels, in order.</param>
-        /// <param name="channelLabels">Column headers, in order.</param>
-        /// <param name="existingWeights">Current multipliers, indexed [program, channel]. May be null.</param>
+        /// <summary>
+        /// Creates the interactive matrix editor.
+        /// </summary>
+        /// <param name="programNames">Row labels in stable input order.</param>
+        /// <param name="channelLabels">Column labels in stable input order.</param>
+        /// <param name="existingWeights">Initial values indexed [program, channel].</param>
+        /// <param name="liveUpdate">
+        /// Callback invoked with a copy of the current matrix when Live Update is enabled.
+        /// </param>
         public ValueSetMatrixForm(
             List<string> programNames,
             List<string> channelLabels,
-            double[,] existingWeights)
+            double[,] existingWeights,
+            Action<double[,]>? liveUpdate = null)
         {
             _programNames = programNames ?? throw new ArgumentNullException(nameof(programNames));
             _channelLabels = channelLabels ?? throw new ArgumentNullException(nameof(channelLabels));
+            _liveUpdate = liveUpdate;
 
-            int nP = _programNames.Count;
-            int nC = _channelLabels.Count;
+            int programCount = _programNames.Count;
+            int channelCount = _channelLabels.Count;
 
-            // -- Rows ----------------------------------------------------------
-            _rows = new ObservableCollection<WeightRow>();
-            for (int p = 0; p < nP; p++)
+            _initialWeights = new double[programCount, channelCount];
+            _weights = new double[programCount, channelCount];
+
+            for (int p = 0; p < programCount; p++)
             {
-                var values = new double[nC];
-                for (int c = 0; c < nC; c++)
+                for (int c = 0; c < channelCount; c++)
                 {
-                    values[c] = (existingWeights != null &&
-                                 existingWeights.GetLength(0) > p &&
-                                 existingWeights.GetLength(1) > c)
-                                ? existingWeights[p, c]
-                                : 1.0;
+                    double value =
+                        existingWeights != null &&
+                        existingWeights.GetLength(0) > p &&
+                        existingWeights.GetLength(1) > c
+                            ? existingWeights[p, c]
+                            : 1.0;
+
+                    value = Quantize(value);
+                    _initialWeights[p, c] = value;
+                    _weights[p, c] = value;
                 }
-                _rows.Add(new WeightRow(_programNames[p], values));
             }
 
-            // -- Dialog setup --------------------------------------------------
-            // No Segoe UI: that font does not exist on macOS. Use the system default.
-            Title = "ValueSet - Program x Channel Weights";
-            Padding = new Padding(8);
+            Title = "ValueSet - Interactive Program x Channel Weights";
+            Padding = new Padding(10);
             Resizable = true;
 
-            // -- Instructions --------------------------------------------------
-            var label = new Label
+            var instructions = new Label
             {
-                Text = "Set multipliers for each program x channel pair.\n" +
-                       "+1.0 = prefer HIGH   |   -1.0 = prefer LOW   |   0.0 = ignore"
+                Text =
+                    "Each cell is constrained to -1.00 through +1.00.\n" +
+                    "+1.00 = prefer HIGH  |  -1.00 = prefer LOW  |  0.00 = ignore.\n" +
+                    "Live Update recomputes Grasshopper while you edit. Cancel restores " +
+                    "the matrix that existed when this dialog opened."
             };
 
-            // -- Grid ----------------------------------------------------------
-            // Eto has no row headers, so the program name becomes a read-only
-            // first column instead.
-            var grid = new GridView
+            _liveUpdateCheckBox = new CheckBox
             {
-                DataStore = _rows,
-                ShowHeader = true,
-                GridLines = GridLines.Both,
-                AllowMultipleSelection = false,
-                RowHeight = 24
+                Text = "Live Update",
+                Checked = false,
+                ToolTip = "When enabled, slider, numeric, Randomize, Jitter, and Reset " +
+                          "changes immediately recompute the Grasshopper definition."
             };
 
-            grid.Columns.Add(new GridColumn
+            _seedStepper = new NumericStepper
             {
-                HeaderText = "Program",
-                Editable = false,
-                Width = 130,
-                Resizable = true,
-                DataCell = new TextBoxCell
-                {
-                    Binding = Binding.Delegate<WeightRow, string>(r => r.Program)
-                }
-            });
+                MinValue = 0,
+                MaxValue = int.MaxValue,
+                Increment = 1,
+                DecimalPlaces = 0,
+                Value = 1234,
+                Width = 100
+            };
 
-            for (int c = 0; c < nC; c++)
+            _jitterStepper = new NumericStepper
             {
-                int channel = c;   // capture per iteration
+                MinValue = 0.0,
+                MaxValue = 1.0,
+                Increment = WeightStep,
+                DecimalPlaces = 2,
+                Value = 0.25,
+                Width = 82
+            };
 
-                grid.Columns.Add(new GridColumn
-                {
-                    HeaderText = _channelLabels[c],
-                    Editable = true,
-                    Width = 90,
-                    Resizable = true,
-                    DataCell = new TextBoxCell
-                    {
-                        Binding = Binding.Delegate<WeightRow, string>(
-                            r => r.Get(channel),
-                            (r, v) => r.Set(channel, v))
-                    }
-                });
-            }
+            _programSelector = new DropDown
+            {
+                DataStore = _programNames,
+                SelectedIndex = _programNames.Count > 0 ? 0 : -1,
+                Width = 180
+            };
 
-            // -- Buttons -------------------------------------------------------
-            var applyButton = new Button { Text = "Apply", Width = 80 };
+            _statusLabel = new Label
+            {
+                Text = "Editing all programs. Live Update is off.",
+                TextColor = Colors.DimGray
+            };
+
+            var controlsRow = CreateControlsRow();
+            var matrix = CreateMatrixLayout();
+            var scrollable = new Scrollable
+            {
+                Content = matrix,
+                Border = BorderType.Bezel,
+                ExpandContentWidth = false,
+                ExpandContentHeight = false
+            };
+
+            var applyButton = new Button { Text = "Apply", Width = 86 };
             applyButton.Click += OnApplyClick;
 
-            var cancelButton = new Button { Text = "Cancel", Width = 80 };
+            var cancelButton = new Button { Text = "Cancel", Width = 86 };
             cancelButton.Click += OnCancelClick;
-
-            var resetButton = new Button { Text = "Reset to 1.0", Width = 100 };
-            resetButton.Click += OnResetClick;
 
             DefaultButton = applyButton;
             AbortButton = cancelButton;
 
-            var buttonRow = new StackLayout
+            var bottomRow = new StackLayout
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = 8,
                 Items =
                 {
+                    _statusLabel,
+                    new StackLayoutItem(null, expand: true),
                     applyButton,
-                    cancelButton,
-                    resetButton,
-                    new StackLayoutItem(null, expand: true)
+                    cancelButton
                 }
             };
 
-            // -- Layout --------------------------------------------------------
             Content = new StackLayout
             {
                 Orientation = Orientation.Vertical,
-                Spacing = 8,
+                Spacing = 9,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Items =
                 {
-                    label,
-                    new StackLayoutItem(grid, expand: true),
-                    buttonRow
+                    instructions,
+                    controlsRow,
+                    new StackLayoutItem(scrollable, expand: true),
+                    bottomRow
                 }
             };
 
-            int width = Math.Max(420, 150 + nC * 90);
-            int height = Math.Max(240, 150 + nP * 24);
-            ClientSize = new Size(Math.Min(width, 1200), Math.Min(height, 800));
-
-            // Kept as a field only so Reset can refresh it.
-            _grid = grid;
+            int width = Math.Max(700, Math.Min(1300, 180 + channelCount * 125));
+            int height = Math.Max(360, Math.Min(850, 240 + programCount * 90));
+            ClientSize = new Size(width, height);
         }
 
-        private readonly GridView _grid;
+        /// <summary>True only after the user clicks Apply.</summary>
+        public bool Confirmed => _confirmed;
 
-        // -- Event handlers ----------------------------------------------------
+        /// <summary>Returns a copy of the current matrix indexed [program, channel].</summary>
+        public double[,] GetWeights()
+        {
+            return CopyMatrix(_weights);
+        }
+
+        private Control CreateControlsRow()
+        {
+            var randomizeAll = new Button { Text = "Randomize All" };
+            randomizeAll.Click += (sender, e) =>
+                ApplyRandomization(EnumerableProgramIndices(), false);
+
+            var jitterAll = new Button { Text = "Jitter All" };
+            jitterAll.Click += (sender, e) =>
+                ApplyRandomization(EnumerableProgramIndices(), true);
+
+            var resetAll = new Button { Text = "Reset All to +1.00" };
+            resetAll.Click += (sender, e) =>
+                ApplyReset(EnumerableProgramIndices());
+
+            var randomizeRow = new Button { Text = "Randomize Row" };
+            randomizeRow.Click += (sender, e) =>
+                ApplyRandomization(SelectedProgramIndex(), false);
+
+            var jitterRow = new Button { Text = "Jitter Row" };
+            jitterRow.Click += (sender, e) =>
+                ApplyRandomization(SelectedProgramIndex(), true);
+
+            var resetRow = new Button { Text = "Reset Row" };
+            resetRow.Click += (sender, e) =>
+                ApplyReset(SelectedProgramIndex());
+
+            return new StackLayout
+            {
+                Orientation = Orientation.Vertical,
+                Spacing = 5,
+                Items =
+                {
+                    new StackLayout
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
+                        Items =
+                        {
+                            _liveUpdateCheckBox,
+                            new Label { Text = "Seed:" },
+                            _seedStepper,
+                            new Label { Text = "Jitter:" },
+                            _jitterStepper,
+                            new Label { Text = "Selected program:" },
+                            _programSelector,
+                            new StackLayoutItem(null, expand: true)
+                        }
+                    },
+                    new StackLayout
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
+                        Items =
+                        {
+                            randomizeAll,
+                            jitterAll,
+                            resetAll,
+                            new Panel { Width = 8 },
+                            randomizeRow,
+                            jitterRow,
+                            resetRow,
+                            new StackLayoutItem(null, expand: true)
+                        }
+                    }
+                }
+            };
+        }
+
+        private TableLayout CreateMatrixLayout()
+        {
+            var table = new TableLayout
+            {
+                Spacing = new Size(5, 5),
+                Padding = new Padding(6)
+            };
+
+            var headerCells = new List<TableCell>
+            {
+                new TableCell(new Label
+                {
+                    Text = "Program",
+                    Font = SystemFonts.Bold(),
+                    VerticalAlignment = VerticalAlignment.Center
+                })
+            };
+
+            for (int c = 0; c < _channelLabels.Count; c++)
+            {
+                headerCells.Add(new TableCell(new Label
+                {
+                    Text = _channelLabels[c],
+                    Font = SystemFonts.Bold(),
+                    TextAlignment = TextAlignment.Center,
+                    Width = 115,
+                    Wrap = WrapMode.Word
+                }));
+            }
+
+            table.Rows.Add(new TableRow(headerCells));
+
+            for (int p = 0; p < _programNames.Count; p++)
+            {
+                var rowCells = new List<TableCell>
+                {
+                    new TableCell(new Label
+                    {
+                        Text = _programNames[p],
+                        Width = 145,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Wrap = WrapMode.Word
+                    })
+                };
+
+                for (int c = 0; c < _channelLabels.Count; c++)
+                {
+                    int programIndex = p;
+                    int channelIndex = c;
+
+                    var editor = new WeightCellEditor(
+                        _weights,
+                        programIndex,
+                        channelIndex,
+                        OnMatrixChanged);
+
+                    _editors.Add(editor);
+                    rowCells.Add(new TableCell(editor.CreateControl()));
+                }
+
+                table.Rows.Add(new TableRow(rowCells));
+            }
+
+            return table;
+        }
+
+        private void OnMatrixChanged()
+        {
+            if (_suppressLiveUpdate)
+                return;
+
+            if (_liveUpdateCheckBox.Checked == true)
+            {
+                _statusLabel.Text = "Live Update active.";
+                _statusLabel.TextColor = Colors.DarkGreen;
+                _liveUpdate?.Invoke(CopyMatrix(_weights));
+            }
+            else
+            {
+                _statusLabel.Text = "Edited locally. Click Apply to commit.";
+                _statusLabel.TextColor = Colors.DimGray;
+            }
+        }
+
+        private IEnumerable<int> EnumerableProgramIndices()
+        {
+            for (int p = 0; p < _programNames.Count; p++)
+                yield return p;
+        }
+
+        private IEnumerable<int> SelectedProgramIndex()
+        {
+            if (_programSelector.SelectedIndex >= 0 &&
+                _programSelector.SelectedIndex < _programNames.Count)
+            {
+                yield return _programSelector.SelectedIndex;
+            }
+        }
+
+        private void ApplyRandomization(IEnumerable<int> programIndices, bool jitter)
+        {
+            var random = new Random((int)_seedStepper.Value);
+            double amplitude = Clamp(_jitterStepper.Value);
+
+            _suppressLiveUpdate = true;
+
+            foreach (int p in programIndices)
+            {
+                if (p < 0 || p >= _programNames.Count)
+                    continue;
+
+                for (int c = 0; c < _channelLabels.Count; c++)
+                {
+                    double next = jitter
+                        ? _weights[p, c] + (random.NextDouble() * 2.0 - 1.0) * amplitude
+                        : random.NextDouble() * 2.0 - 1.0;
+
+                    SetWeight(p, c, next);
+                }
+            }
+
+            _suppressLiveUpdate = false;
+
+            _statusLabel.Text = jitter
+                ? "Jitter complete. Seed can reproduce this variation."
+                : "Randomize complete. Seed can reproduce this matrix.";
+            _statusLabel.TextColor = Colors.DimGray;
+
+            OnMatrixChanged();
+        }
+
+        private void ApplyReset(IEnumerable<int> programIndices)
+        {
+            _suppressLiveUpdate = true;
+
+            foreach (int p in programIndices)
+            {
+                if (p < 0 || p >= _programNames.Count)
+                    continue;
+
+                for (int c = 0; c < _channelLabels.Count; c++)
+                    SetWeight(p, c, 1.0);
+            }
+
+            _suppressLiveUpdate = false;
+            _statusLabel.Text = "Selected weights reset to +1.00.";
+            _statusLabel.TextColor = Colors.DimGray;
+
+            OnMatrixChanged();
+        }
+
+        private void SetWeight(int programIndex, int channelIndex, double value)
+        {
+            value = Quantize(value);
+            _weights[programIndex, channelIndex] = value;
+
+            int editorIndex = programIndex * _channelLabels.Count + channelIndex;
+
+            if (editorIndex >= 0 && editorIndex < _editors.Count)
+                _editors[editorIndex].SetValue(value);
+        }
+
         private void OnApplyClick(object? sender, EventArgs e)
         {
             _confirmed = true;
@@ -219,38 +528,36 @@ namespace Cumulus.UI
 
         private void OnCancelClick(object? sender, EventArgs e)
         {
+            if (_liveUpdateCheckBox.Checked == true)
+                _liveUpdate?.Invoke(CopyMatrix(_initialWeights));
+
             _confirmed = false;
             Close();
         }
 
-        private void OnResetClick(object? sender, EventArgs e)
+        private static double[,] CopyMatrix(double[,] source)
         {
-            foreach (var row in _rows)
-                for (int c = 0; c < row.Values.Length; c++)
-                    row.Values[c] = 1.0;
+            int rows = source.GetLength(0);
+            int columns = source.GetLength(1);
+            var copy = new double[rows, columns];
 
-            // Re-assigning the data store is the safe way to force a full
-            // refresh; calling Invalidate() during an active edit can re-enter
-            // the draw loop.
-            _grid.DataStore = _rows;
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < columns; c++)
+                    copy[r, c] = source[r, c];
+
+            return copy;
         }
 
-        // -- Public accessors --------------------------------------------------
-        /// <summary>True if the user clicked Apply (not Cancel).</summary>
-        public bool Confirmed => _confirmed;
-
-        /// <summary>Returns the full weights matrix, indexed [program, channel].</summary>
-        public double[,] GetWeights()
+        private static double Clamp(double value)
         {
-            int nP = _programNames.Count;
-            int nC = _channelLabels.Count;
-            var result = new double[nP, nC];
+            return Math.Max(MinimumWeight, Math.Min(MaximumWeight, value));
+        }
 
-            for (int p = 0; p < nP && p < _rows.Count; p++)
-                for (int c = 0; c < nC; c++)
-                    result[p, c] = _rows[p].Values[c];
-
-            return result;
+        private static double Quantize(double value)
+        {
+            return Math.Round(
+                Clamp(value) / WeightStep,
+                MidpointRounding.AwayFromZero) * WeightStep;
         }
     }
 }

@@ -7,7 +7,7 @@ using Grasshopper.Kernel;
 using Rhino.Geometry;
 using Rhino.Geometry.Intersect;
 
-namespace Cumulus
+namespace Cumulus.Components.Legacy
 {
     /// <summary>
     /// Openness of the space around each voxel centre, measured by casting

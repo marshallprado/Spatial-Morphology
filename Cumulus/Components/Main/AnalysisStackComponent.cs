@@ -9,7 +9,7 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Components.Data
 {
     /// <summary>
     /// Thin Grasshopper adapter over <see cref="VoxelScoringEngine"/>.

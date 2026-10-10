@@ -1,5 +1,5 @@
 // -*- coding: utf-8 -*-
-// Version 2.1.0
+// Version 2.2.0
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,58 +14,31 @@ namespace Cumulus
     /// Defines per-channel multipliers for each program. Double-click the component
     /// on the canvas to open the matrix editor.
     /// </summary>
-    /// <remarks>
-    /// CROSS-PLATFORM NOTE
-    /// This file must compile and load on Rhino 8 for Windows AND macOS.
-    /// That rules out System.Windows.Forms entirely: no MessageBox, no
-    /// ToolStripDropDown, no AppendAdditionalMenuItems override. All UI goes
-    /// through Eto.Forms or Rhino.UI, both of which exist on both platforms.
-    ///
-    /// Two separate pieces of state are kept on purpose:
-    ///
-    ///   _weights            persistent ARCHIVE of every multiplier ever set,
-    ///                       keyed [program][channel]. Entries are never removed
-    ///                       automatically, so disconnecting a channel and
-    ///                       reconnecting it later restores the value the user
-    ///                       chose rather than silently resetting it to +1.0.
-    ///
-    ///   _liveProgramNames   what is ACTUALLY connected right now, in input
-    ///   _liveChannelLabels  order. Rebuilt from scratch on every solve.
-    ///
-    /// The editor and the value_sets output both read the LIVE lists. The archive
-    /// is only consulted to look up a starting value. Reading the editor's rows
-    /// from the archive was the original bug: removing an analysis input left the
-    /// old key in the dictionary, so the matrix kept showing a column for a
-    /// channel that was no longer wired in.
-    /// </remarks>
     public class ValueSetComponent : GH_Component
     {
-        // -- Persistent archive ------------------------------------------------
         // weights[programName][channelLabel] = multiplier
         private Dictionary<string, Dictionary<string, double>> _weights
             = new Dictionary<string, Dictionary<string, double>>();
 
-        // -- Live state, rebuilt each solve ------------------------------------
+        // Live input state; rebuilt on every successful solve.
         private List<string> _liveProgramNames = new List<string>();
         private List<string> _liveChannelLabels = new List<string>();
         private bool _hasSolved;
 
-        // -- Constructor -------------------------------------------------------
         public ValueSetComponent()
             : base(
                 "ValueSet",
                 "ValSet",
-                "Define per-channel multipliers for each program.\n" +
-                "Double-click the component to open the matrix editor.\n\n" +
-                "The editor always shows exactly the programs and channels that\n" +
-                "are connected right now. Disconnecting an analysis removes its\n" +
-                "column; reconnecting it restores the multiplier you had set.\n\n" +
-                "Version 2.1.0",
+                "Defines per-channel multipliers for each program.\n" +
+                "Double-click the component to open the interactive weight matrix.\n\n" +
+                "The editor provides numeric fields, sliders, seeded Randomize and " +
+                "Jitter controls. Enable Live Update to recompute Grasshopper while editing.\n\n" +
+                "Version 2.2.0",
                 "Cumulus",
                 "1 | Setup")
-        { }
+        {
+        }
 
-        // -- GUID — DO NOT CHANGE ----------------------------------------------
         public override Guid ComponentGuid =>
             new Guid("B1C2D3E4-F5A6-7890-BCDE-F12345678901");
 
@@ -80,68 +53,73 @@ namespace Cumulus
             }
         }
 
-        // -- Custom attributes: double-click opens the editor ------------------
         public override void CreateAttributes()
         {
             m_attributes = new ValueSetAttributes(this);
         }
 
-        private sealed class ValueSetAttributes : Grasshopper.Kernel.Attributes.GH_ComponentAttributes
+        private sealed class ValueSetAttributes
+            : Grasshopper.Kernel.Attributes.GH_ComponentAttributes
         {
-            public ValueSetAttributes(ValueSetComponent owner) : base(owner) { }
+            public ValueSetAttributes(ValueSetComponent owner) : base(owner)
+            {
+            }
 
             public override GH_ObjectResponse RespondToMouseDoubleClick(
-                GH_Canvas sender, GH_CanvasMouseEvent e)
+                GH_Canvas sender,
+                GH_CanvasMouseEvent e)
             {
                 ((ValueSetComponent)Owner).OpenWeightsEditor();
                 return GH_ObjectResponse.Handled;
             }
         }
 
-        // NOTE: no AppendAdditionalMenuItems override here. The Grasshopper
-        // signature for it takes a System.Windows.Forms.ToolStripDropDown, which
-        // does not exist in the macOS Rhino runtime. Archive housekeeping is
-        // offered inside the Eto editor instead — see OpenWeightsEditor.
-
-        // -- Parameters — order and nicknames unchanged -------------------------
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            pManager.AddGenericParameter("analysis", "A",
-                "List of SpatialAnalysis objects from SA components.\n" +
-                "Removing one removes its column from the editor.",
+            pManager.AddGenericParameter(
+                "analysis",
+                "A",
+                "SpatialAnalysis objects. Their labels become the matrix columns.",
                 GH_ParamAccess.list);
-            pManager.AddGenericParameter("programs", "P",
-                "List of ProgramDefinition objects from ProgramDefinition components.",
+
+            pManager.AddGenericParameter(
+                "programs",
+                "P",
+                "ProgramDefinition objects. Their names become the matrix rows.",
                 GH_ParamAccess.list);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            pManager.AddGenericParameter("programs", "P",
+            pManager.AddGenericParameter(
+                "programs",
+                "P",
                 "ProgramDefinition objects coupled with their ValueSet weights. " +
                 "Wire directly into AnalysisStack P.",
                 GH_ParamAccess.list);
-            pManager.AddTextParameter("info", "I",
-                "Summary of current weights.",
+
+            pManager.AddTextParameter(
+                "info",
+                "I",
+                "Summary of active weights.",
                 GH_ParamAccess.item);
         }
 
-        // -- Solve -------------------------------------------------------------
         protected override void SolveInstance(IGH_DataAccess DA)
         {
             var programObjects = new List<object>();
             var analysisObjects = new List<object>();
 
-            // Clear live state up front so a failed solve cannot leave the
-            // editor showing channels from the previous successful run.
             _liveProgramNames = new List<string>();
             _liveChannelLabels = new List<string>();
             _hasSolved = false;
 
-            if (!DA.GetDataList(0, analysisObjects)) return;
-            if (!DA.GetDataList(1, programObjects)) return;
+            if (!DA.GetDataList(0, analysisObjects))
+                return;
 
-            // -- Extract complete programs, preserving input order --------------
+            if (!DA.GetDataList(1, programObjects))
+                return;
+
             var programs = new List<ProgramDefinition>();
             var programNames = new List<string>();
             var seenProgramNames = new HashSet<string>(StringComparer.Ordinal);
@@ -162,7 +140,7 @@ namespace Cumulus
                 {
                     AddRuntimeMessage(
                         GH_RuntimeMessageLevel.Warning,
-                        $"Ignored duplicate program '{program.Name}'.");
+                        "Ignored duplicate program '" + program.Name + "'.");
                     continue;
                 }
 
@@ -170,100 +148,106 @@ namespace Cumulus
                 programNames.Add(program.Name);
             }
 
-            // -- Extract channel labels, preserving input order ----------------
             var channelLabels = new List<string>();
             foreach (var obj in analysisObjects)
             {
-                var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper w2
-                    ? w2.Value : obj;
-                if (inner == null) continue;
+                var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper wrapper
+                    ? wrapper.Value
+                    : obj;
 
-                if (inner is SpatialAnalysis sa)
+                if (inner == null)
+                    continue;
+
+                if (inner is SpatialAnalysis analysis)
                 {
-                    if (!channelLabels.Contains(sa.Label))
-                        channelLabels.Add(sa.Label);
+                    if (!channelLabels.Contains(analysis.Label))
+                        channelLabels.Add(analysis.Label);
                     continue;
                 }
+
                 try
                 {
-                    dynamic dynObj = inner;
-                    string l = dynObj.label?.ToString();
-                    if (!string.IsNullOrWhiteSpace(l) && !channelLabels.Contains(l))
-                        channelLabels.Add(l);
+                    dynamic value = inner;
+                    string label = value.label?.ToString();
+
+                    if (!string.IsNullOrWhiteSpace(label) &&
+                        !channelLabels.Contains(label))
+                    {
+                        channelLabels.Add(label);
+                    }
                 }
-                catch { }
+                catch
+                {
+                    // Invalid generic input is ignored; the live summary exposes
+                    // only valid analysis labels.
+                }
             }
 
             if (programNames.Count == 0)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
-                    "No program names found. Connect ProgramDefinition objects.");
-                return;
-            }
-            if (channelLabels.Count == 0)
-            {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
-                    "No channel labels found. Connect SpatialAnalysis objects.");
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Warning,
+                    "No valid ProgramDefinition objects found. Connect programs to P.");
                 return;
             }
 
-            // -- Commit live state ---------------------------------------------
+            if (channelLabels.Count == 0)
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Warning,
+                    "No SpatialAnalysis labels found. Connect analyses to A.");
+                return;
+            }
+
             _liveProgramNames = programNames;
             _liveChannelLabels = channelLabels;
             _hasSolved = true;
 
-            // -- Seed the archive for anything new -----------------------------
-            // Existing entries are left alone. Nothing is ever deleted here:
-            // that is what makes reconnecting a channel restore its multiplier.
-            foreach (var prog in programNames)
-            {
-                if (!_weights.ContainsKey(prog))
-                    _weights[prog] = new Dictionary<string, double>();
+            EnsureWeights(programNames, channelLabels);
 
-                foreach (var ch in channelLabels)
-                    if (!_weights[prog].ContainsKey(ch))
-                        _weights[prog][ch] = 1.0;
-            }
-
-            // -- Build coupled ProgramDefinition + ValueSet outputs -------------
-            // AnalysisStack can consume these directly through its P input.
             var programsWithValueSets = new List<ProgramWithValueSet>();
 
             foreach (var program in programs)
             {
-                var weights = new Dictionary<string, double>();
+                var row = new Dictionary<string, double>();
 
                 foreach (var channel in channelLabels)
-                    weights[channel] = LookupWeight(program.Name, channel);
-
-                var valueSet = new ValueSet(program.Name, weights);
+                    row[channel] = LookupWeight(program.Name, channel);
 
                 programsWithValueSets.Add(
-                    new ProgramWithValueSet(program, valueSet));
+                    new ProgramWithValueSet(
+                        program,
+                        new ValueSet(program.Name, row)));
             }
 
-            // -- Info string ---------------------------------------------------
             int archivedExtras = CountArchivedExtras();
 
             var lines = new System.Text.StringBuilder();
             lines.AppendLine(string.Format(
                 "ValueSet | {0} programs x {1} channels",
-                programNames.Count, channelLabels.Count));
+                programNames.Count,
+                channelLabels.Count));
             lines.AppendLine("");
-
             lines.Append("Program".PadRight(20));
-            foreach (var ch in channelLabels)
-                lines.Append(ch.PadRight(14));
-            lines.AppendLine("");
 
+            foreach (var channel in channelLabels)
+                lines.Append(channel.PadRight(14));
+
+            lines.AppendLine("");
             lines.AppendLine(new string('-', 20 + channelLabels.Count * 14));
 
-            foreach (var prog in programNames)
+            foreach (var program in programNames)
             {
-                lines.Append(prog.PadRight(20));
-                foreach (var ch in channelLabels)
-                    lines.Append(string.Format("{0:+0.00;-0.00}",
-                        LookupWeight(prog, ch)).PadRight(14));
+                lines.Append(program.PadRight(20));
+
+                foreach (var channel in channelLabels)
+                {
+                    lines.Append(
+                        LookupWeight(program, channel)
+                            .ToString("+0.00;-0.00;0.00")
+                            .PadRight(14));
+                }
+
                 lines.AppendLine("");
             }
 
@@ -271,18 +255,84 @@ namespace Cumulus
             {
                 lines.AppendLine("");
                 lines.AppendLine(string.Format(
-                    "{0} remembered multiplier(s) for disconnected channels are " +
-                    "being held in reserve.", archivedExtras));
-                lines.AppendLine(
-                    "They do not affect the output. Reconnect a channel to get " +
-                    "its value back, or clear them from the editor.");
+                    "{0} remembered multiplier(s) for disconnected programs or channels " +
+                    "are retained in the archive.",
+                    archivedExtras));
             }
 
             DA.SetDataList(0, programsWithValueSets);
             DA.SetData(1, lines.ToString().TrimEnd());
         }
 
-        // -- Program unwrapping -----------------------------------------------
+        /// <summary>
+        /// Applies a live Eto-editor matrix to the current persistent archive.
+        /// Values are clamped to the supported interactive range.
+        /// </summary>
+        internal void ApplyLiveWeights(
+            IReadOnlyList<string> programNames,
+            IReadOnlyList<string> channelLabels,
+            double[,] weights)
+        {
+            if (programNames == null)
+                throw new ArgumentNullException(nameof(programNames));
+
+            if (channelLabels == null)
+                throw new ArgumentNullException(nameof(channelLabels));
+
+            if (weights == null)
+                throw new ArgumentNullException(nameof(weights));
+
+            for (int programIndex = 0; programIndex < programNames.Count; programIndex++)
+            {
+                string program = programNames[programIndex];
+
+                if (!_weights.TryGetValue(program, out var row))
+                {
+                    row = new Dictionary<string, double>();
+                    _weights[program] = row;
+                }
+
+                for (int channelIndex = 0; channelIndex < channelLabels.Count; channelIndex++)
+                {
+                    if (programIndex >= weights.GetLength(0) ||
+                        channelIndex >= weights.GetLength(1))
+                    {
+                        continue;
+                    }
+
+                    row[channelLabels[channelIndex]] = ClampWeight(
+                        weights[programIndex, channelIndex]);
+                }
+            }
+
+            ExpireSolution(true);
+        }
+
+        private void EnsureWeights(
+            IEnumerable<string> programNames,
+            IEnumerable<string> channelLabels)
+        {
+            foreach (var program in programNames)
+            {
+                if (!_weights.TryGetValue(program, out var row))
+                {
+                    row = new Dictionary<string, double>();
+                    _weights[program] = row;
+                }
+
+                foreach (var channel in channelLabels)
+                {
+                    if (!row.ContainsKey(channel))
+                        row[channel] = 1.0;
+                }
+            }
+        }
+
+        private static double ClampWeight(double value)
+        {
+            return Math.Max(-1.0, Math.Min(1.0, value));
+        }
+
         private static ProgramDefinition? UnwrapProgram(object obj)
         {
             var inner = obj is Grasshopper.Kernel.Types.GH_ObjectWrapper wrapper
@@ -298,21 +348,21 @@ namespace Cumulus
             try
             {
                 dynamic value = inner;
-
                 string? name = value.name?.ToString();
+
                 if (string.IsNullOrWhiteSpace(name))
                     return null;
 
                 int voxelCount = Convert.ToInt32(value.voxel_count);
-
                 dynamic color = value.color;
-                int red = Convert.ToInt32(color.R);
-                int green = Convert.ToInt32(color.G);
-                int blue = Convert.ToInt32(color.B);
 
                 return new ProgramDefinition(
                     name,
-                    Color.FromArgb(255, red, green, blue),
+                    Color.FromArgb(
+                        255,
+                        Convert.ToInt32(color.R),
+                        Convert.ToInt32(color.G),
+                        Convert.ToInt32(color.B)),
                     voxelCount);
             }
             catch
@@ -321,69 +371,66 @@ namespace Cumulus
             }
         }
 
-        // -- Archive lookup ----------------------------------------------------
         private double LookupWeight(string program, string channel)
         {
             return _weights.TryGetValue(program, out var row) &&
                    row.TryGetValue(channel, out double value)
-                   ? value : 1.0;
+                ? value
+                : 1.0;
         }
 
-        /// <summary>
-        /// Counts archived entries that no longer correspond to a connected
-        /// program/channel pair. Purely informational.
-        /// </summary>
         private int CountArchivedExtras()
         {
-            if (!_hasSolved) return 0;
+            if (!_hasSolved)
+                return 0;
 
             int extras = 0;
-            foreach (var prog in _weights)
+
+            foreach (var program in _weights)
             {
-                bool progLive = _liveProgramNames.Contains(prog.Key);
-                foreach (var ch in prog.Value)
+                bool programIsLive = _liveProgramNames.Contains(program.Key);
+
+                foreach (var channel in program.Value)
                 {
-                    if (!progLive || !_liveChannelLabels.Contains(ch.Key))
+                    if (!programIsLive ||
+                        !_liveChannelLabels.Contains(channel.Key))
+                    {
                         extras++;
+                    }
                 }
             }
+
             return extras;
         }
 
-        /// <summary>
-        /// Drops archived entries for programs and channels that are not
-        /// currently connected. Called from the editor, never automatically.
-        /// </summary>
         private void PurgeArchive()
         {
             var cleaned = new Dictionary<string, Dictionary<string, double>>();
 
-            foreach (var prog in _liveProgramNames)
+            foreach (var program in _liveProgramNames)
             {
                 var row = new Dictionary<string, double>();
-                foreach (var ch in _liveChannelLabels)
-                    row[ch] = LookupWeight(prog, ch);
-                cleaned[prog] = row;
+
+                foreach (var channel in _liveChannelLabels)
+                    row[channel] = LookupWeight(program, channel);
+
+                cleaned[program] = row;
             }
 
             _weights = cleaned;
         }
 
-        // -- Editor launch (called from double-click) ---------------------------
         internal void OpenWeightsEditor()
         {
-            // Rhino.UI.Dialogs is available on Windows and macOS. MessageBox is not.
             if (!_hasSolved)
             {
                 Rhino.UI.Dialogs.ShowMessage(
-                    "Connect programs and analysis inputs, and let the component " +
-                    "solve once, before editing weights.",
+                    "Connect programs and analysis inputs, then allow ValueSet " +
+                    "to solve once before opening the editor.",
                     "ValueSet");
                 return;
             }
 
-            // Snapshot the LIVE lists. This is the whole fix: the editor is built
-            // from what is connected now, not from the archive's leftover keys.
             var programNames = new List<string>(_liveProgramNames);
             var channelLabels = new List<string>(_liveChannelLabels);
 
@@ -395,77 +442,81 @@ namespace Cumulus
                 return;
             }
 
-            int nP = programNames.Count;
-            int nC = channelLabels.Count;
-            var existing = new double[nP, nC];
+            var existing = new double[programNames.Count, channelLabels.Count];
 
-            for (int p = 0; p < nP; p++)
-                for (int c = 0; c < nC; c++)
+            for (int p = 0; p < programNames.Count; p++)
+            {
+                for (int c = 0; c < channelLabels.Count; c++)
                     existing[p, c] = LookupWeight(programNames[p], channelLabels[c]);
+            }
 
-            var form = new UI.ValueSetMatrixForm(programNames, channelLabels, existing);
+            var form = new UI.ValueSetMatrixForm(
+                programNames,
+                channelLabels,
+                existing,
+                liveWeights => ApplyLiveWeights(programNames, channelLabels, liveWeights));
+
             form.ShowModal(Rhino.UI.RhinoEtoApp.MainWindow);
 
-            if (!form.Confirmed) return;
+            if (!form.Confirmed)
+                return;
 
-            double[,] newWeights = form.GetWeights();
+            ApplyLiveWeights(programNames, channelLabels, form.GetWeights());
 
-            for (int p = 0; p < nP; p++)
-            {
-                if (!_weights.ContainsKey(programNames[p]))
-                    _weights[programNames[p]] = new Dictionary<string, double>();
-
-                for (int c = 0; c < nC; c++)
-                    _weights[programNames[p]][channelLabels[c]] = newWeights[p, c];
-            }
-
-            // Offer archive housekeeping here rather than in a context menu,
-            // since the context-menu API is Windows-only.
             int extras = CountArchivedExtras();
-            if (extras > 0)
+
+            if (extras <= 0)
+                return;
+
+            var answer = Rhino.UI.Dialogs.ShowMessage(
+                string.Format(
+                    "{0} multiplier(s) are remembered for disconnected programs or channels.\n\n" +
+                    "Keep them so reconnecting restores the values?\n\n" +
+                    "Yes = keep them (recommended)\n" +
+                    "No = forget them permanently",
+                    extras),
+                "ValueSet",
+                Rhino.UI.ShowMessageButton.YesNo,
+                Rhino.UI.ShowMessageIcon.Question);
+
+            if (answer == Rhino.UI.ShowMessageResult.No)
             {
-                var answer = Rhino.UI.Dialogs.ShowMessage(
-                    string.Format(
-                        "{0} multiplier(s) are still remembered for programs or " +
-                        "channels that are no longer connected.\n\n" +
-                        "Keep them, so reconnecting restores your values?\n\n" +
-                        "Yes  = keep (recommended)\n" +
-                        "No   = forget them permanently",
-                        extras),
-                    "ValueSet",
-                    Rhino.UI.ShowMessageButton.YesNo,
-                    Rhino.UI.ShowMessageIcon.Question);
-
-                if (answer == Rhino.UI.ShowMessageResult.No)
-                    PurgeArchive();
+                PurgeArchive();
+                ExpireSolution(true);
             }
-
-            ExpireSolution(true);
         }
 
-        // -- Serialization — original keys preserved, do not rename -------------
         public override bool Write(GH_IO.Serialization.GH_IWriter writer)
         {
             writer.SetInt32("schema", 2);
 
-            int p = 0;
-            foreach (var prog in _weights)
-            {
-                writer.SetString("prog_" + p, prog.Key);
-                int c = 0;
-                foreach (var ch in prog.Value)
-                {
-                    writer.SetString(string.Format("ch_{0}_{1}", p, c), ch.Key);
-                    writer.SetDouble(string.Format("wt_{0}_{1}", p, c), ch.Value);
-                    c++;
-                }
-                writer.SetInt32("ch_count_" + p, c);
-                p++;
-            }
-            writer.SetInt32("prog_count", p);
+            int programIndex = 0;
 
-            // Persist the live lists so a reopened file shows the correct matrix
-            // even if the user double-clicks before the first solve finishes.
+            foreach (var program in _weights)
+            {
+                writer.SetString("prog_" + programIndex, program.Key);
+
+                int channelIndex = 0;
+
+                foreach (var channel in program.Value)
+                {
+                    writer.SetString(
+                        string.Format("ch_{0}_{1}", programIndex, channelIndex),
+                        channel.Key);
+
+                    writer.SetDouble(
+                        string.Format("wt_{0}_{1}", programIndex, channelIndex),
+                        channel.Value);
+
+                    channelIndex++;
+                }
+
+                writer.SetInt32("ch_count_" + programIndex, channelIndex);
+                programIndex++;
+            }
+
+            writer.SetInt32("prog_count", programIndex);
+
             writer.SetInt32("live_prog_count", _liveProgramNames.Count);
             for (int i = 0; i < _liveProgramNames.Count; i++)
                 writer.SetString("live_prog_" + i, _liveProgramNames[i]);
@@ -484,53 +535,69 @@ namespace Cumulus
             _liveChannelLabels = new List<string>();
             _hasSolved = false;
 
-            int progCount = 0;
-            if (reader.TryGetInt32("prog_count", ref progCount))
-            {
-                for (int p = 0; p < progCount; p++)
-                {
-                    string progName = "";
-                    if (!reader.TryGetString("prog_" + p, ref progName)) continue;
-                    _weights[progName] = new Dictionary<string, double>();
+            int programCount = 0;
 
-                    int chCount = 0;
-                    reader.TryGetInt32("ch_count_" + p, ref chCount);
-                    for (int c = 0; c < chCount; c++)
+            if (reader.TryGetInt32("prog_count", ref programCount))
+            {
+                for (int p = 0; p < programCount; p++)
+                {
+                    string programName = "";
+
+                    if (!reader.TryGetString("prog_" + p, ref programName))
+                        continue;
+
+                    _weights[programName] = new Dictionary<string, double>();
+
+                    int channelCount = 0;
+                    reader.TryGetInt32("ch_count_" + p, ref channelCount);
+
+                    for (int c = 0; c < channelCount; c++)
                     {
-                        string chName = "";
-                        double wt = 1.0;
-                        if (reader.TryGetString(string.Format("ch_{0}_{1}", p, c), ref chName) &&
-                            reader.TryGetDouble(string.Format("wt_{0}_{1}", p, c), ref wt))
-                            _weights[progName][chName] = wt;
+                        string channelName = "";
+                        double weight = 1.0;
+
+                        if (reader.TryGetString(
+                                string.Format("ch_{0}_{1}", p, c),
+                                ref channelName) &&
+                            reader.TryGetDouble(
+                                string.Format("wt_{0}_{1}", p, c),
+                                ref weight))
+                        {
+                            _weights[programName][channelName] = weight;
+                        }
                     }
                 }
             }
 
-            // Schema 1 files have no live lists; they stay empty and the first
-            // solve repopulates them.
-            int liveProgCount = 0;
-            if (reader.TryGetInt32("live_prog_count", ref liveProgCount))
+            int liveProgramCount = 0;
+
+            if (reader.TryGetInt32("live_prog_count", ref liveProgramCount))
             {
-                for (int i = 0; i < liveProgCount; i++)
+                for (int i = 0; i < liveProgramCount; i++)
                 {
-                    string n = "";
-                    if (reader.TryGetString("live_prog_" + i, ref n))
-                        _liveProgramNames.Add(n);
+                    string name = "";
+
+                    if (reader.TryGetString("live_prog_" + i, ref name))
+                        _liveProgramNames.Add(name);
                 }
             }
 
-            int liveChCount = 0;
-            if (reader.TryGetInt32("live_ch_count", ref liveChCount))
+            int liveChannelCount = 0;
+
+            if (reader.TryGetInt32("live_ch_count", ref liveChannelCount))
             {
-                for (int i = 0; i < liveChCount; i++)
+                for (int i = 0; i < liveChannelCount; i++)
                 {
-                    string n = "";
-                    if (reader.TryGetString("live_ch_" + i, ref n))
-                        _liveChannelLabels.Add(n);
+                    string name = "";
+
+                    if (reader.TryGetString("live_ch_" + i, ref name))
+                        _liveChannelLabels.Add(name);
                 }
             }
 
-            _hasSolved = _liveProgramNames.Count > 0 && _liveChannelLabels.Count > 0;
+            _hasSolved =
+                _liveProgramNames.Count > 0 &&
+                _liveChannelLabels.Count > 0;
 
             return base.Read(reader);
         }
