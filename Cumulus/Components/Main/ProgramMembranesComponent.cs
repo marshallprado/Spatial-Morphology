@@ -10,51 +10,39 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Components.Main
 {
     /// <summary>
-    /// Creates individual program-colored membrane meshes from the exact
-    /// canonical ProgramInterfaceData records produced by Program Interfaces.
-    /// This component is visual/derived geometry only; it never changes the
-    /// canonical interface mesh or the AnalysisStack.
+    /// Generates closed program membranes directly from voxel grid and program distribution.
+    /// Creates one mesh per program with inward-facing normals, optional Laplacian smoothing,
+    /// and configurable gap offset for visual separation.
     /// </summary>
     public sealed class ProgramMembranesComponent : GH_Component
     {
-        private const int CoreProgramIndex = -2;
-        private const double TotalProgramMeshGap = 0.1;
-
-        private readonly List<Mesh> _previewMeshes = new List<Mesh>();
-        private readonly List<Color> _previewColors = new List<Color>();
-
         public ProgramMembranesComponent()
             : base(
                 "Program Membranes",
-                "Membranes",
-                "Builds one color-coded membrane mesh per program from the exact " +
-                "Program Interfaces data.\n\n" +
-                "Program-to-program faces may be separated by a fixed 0.1 model-unit " +
-                "gap for clearer Rhino viewport display. Program-to-core interfaces " +
-                "and horizontal caps remain unoffset.\n\n" +
-                "No smoothing is applied. The canonical Program Interfaces output " +
-                "remains the exact source topology for future circulation and " +
-                "structural refinement.",
+                "ProgMembranes",
+                "Generates closed program membranes directly from the voxel grid. " +
+                "Each program becomes a complete mesh with inward-facing normals.\n\n" +
+                "Optional Laplacian smoothing with pinned boundary vertices smooths " +
+                "interior geometry while preserving interface topology.\n\n" +
+                "Gap offset separates program meshes visually without overlap.",
                 "Cumulus",
                 "3 | Main")
         {
         }
 
         public override Guid ComponentGuid =>
-            new Guid("AF580E6A-399C-42EF-AF7A-246D13DBB091");
+            new Guid("50C2841F-9D32-5C25-A458-D8F6D9B44E83");
 
         protected override Bitmap Icon
         {
             get
             {
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-
-                using var stream = assembly.GetManifestResourceStream(
+                var stream = assembly.GetManifestResourceStream(
                     "Cumulus.Resources.ProgMembranes_24.png");
-
                 return stream != null ? new Bitmap(stream) : null!;
             }
         }
@@ -64,34 +52,33 @@ namespace Cumulus
             pManager.AddGenericParameter(
                 "analysis_stack",
                 "AS",
-                "AnalysisStackData from AnalysisStack. Used to retrieve program " +
-                "names, colors, VoxelGrid orientation, and voxel size.",
+                "AnalysisStackData from AnalysisStack.",
                 GH_ParamAccess.item);
 
-            pManager.AddGenericParameter(
-                "interface_data",
-                "ID",
-                "ProgramInterfaceData tree from Program Interfaces ID.",
-                GH_ParamAccess.tree);
+            pManager.AddIntegerParameter(
+                "smoothing_iterations",
+                "SI",
+                "Number of Laplacian smoothing passes. 0 = no smoothing.",
+                GH_ParamAccess.item,
+                1);
 
-            pManager.AddBooleanParameter(
-                "separate_program_meshes",
+            pManager.AddNumberParameter(
+                "gap_value",
                 "G",
-                "When True, each program-to-program membrane is offset toward " +
-                "its own program volume. The total visual separation between " +
-                "opposing membranes is 0.1 Rhino model units.\n\n" +
-                "Program-to-core interfaces and horizontal caps remain unoffset.",
+                "Offset distance (model units) to separate program meshes inward. " +
+                "0 = no offset, positive values shrink meshes inward.",
                 GH_ParamAccess.item,
-                true);
+                0.05);
 
             pManager.AddBooleanParameter(
-                "include_horizontal_caps",
-                "HC",
-                "Include top and bottom open-boundary cap faces emitted by " +
-                "Program Interfaces.",
+                "include_boundary_faces",
+                "IBF",
+                "Generate faces for voxels adjacent to unallocated/exterior volume. " +
+                "Creates completely closed meshes.",
                 GH_ParamAccess.item,
-                true);
+                false);
 
+            pManager[1].Optional = true;
             pManager[2].Optional = true;
             pManager[3].Optional = true;
         }
@@ -101,63 +88,29 @@ namespace Cumulus
             pManager.AddMeshParameter(
                 "membranes",
                 "M",
-                "One derived membrane mesh per program, grouped by program index.",
-                GH_ParamAccess.tree);
-
-            pManager.AddIntegerParameter(
-                "program_indices",
-                "PI",
-                "Program index parallel to each membrane mesh.",
+                "One closed mesh per program with inward-facing normals, grouped by program index.",
                 GH_ParamAccess.tree);
 
             pManager.AddTextParameter(
-                "program_names",
-                "PN",
-                "Program name parallel to each membrane mesh.",
+                "info",
+                "I",
+                "Summary per program (voxel count, vertex count, face count).",
                 GH_ParamAccess.tree);
-
-            pManager.AddColourParameter(
-                "colors",
-                "C",
-                "Program color parallel to each membrane mesh.",
-                GH_ParamAccess.tree);
-
-            pManager.AddNumberParameter(
-                "represented_interface_area",
-                "A",
-                "Total canonical interface area represented by each program membrane.",
-                GH_ParamAccess.tree);
-
-            pManager.AddGenericParameter(
-                "source_interfaces",
-                "SI",
-                "ProgramInterfaceData records used to create each program membrane.",
-                GH_ParamAccess.tree);
-
-            pManager.AddTextParameter(
-                "report",
-                "R",
-                "Membrane creation summary.",
-                GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            ClearPreviewGeometry();
-
             object? stackObject = null;
-            var interfaceTree = new GH_Structure<IGH_Goo>();
-            bool separateProgramMeshes = true;
-            bool includeHorizontalCaps = true;
+            int smoothingIterations = 1;
+            double gapValue = 0.05;
+            bool includeBoundaryFaces = false;
 
             if (!DA.GetData(0, ref stackObject))
                 return;
 
-            if (!DA.GetDataTree(1, out interfaceTree))
-                return;
-
-            DA.GetData(2, ref separateProgramMeshes);
-            DA.GetData(3, ref includeHorizontalCaps);
+            DA.GetData(1, ref smoothingIterations);
+            DA.GetData(2, ref gapValue);
+            DA.GetData(3, ref includeBoundaryFaces);
 
             AnalysisStackData? stack = UnwrapStack(stackObject);
 
@@ -166,242 +119,66 @@ namespace Cumulus
                 AddRuntimeMessage(
                     GH_RuntimeMessageLevel.Error,
                     "Could not read AnalysisStackData from AS.");
-
                 return;
             }
 
-            if (stack.VoxelGrid == null || stack.Programs == null)
+            if (stack.VoxelGrid == null ||
+                stack.ProgramIndices == null ||
+                stack.VoxelGrid.FilledKeys.Count != stack.ProgramIndices.Count)
             {
                 AddRuntimeMessage(
                     GH_RuntimeMessageLevel.Error,
-                    "AnalysisStackData is missing VoxelGrid or Programs data.");
-
+                    "AnalysisStackData has inconsistent VoxelGrid and ProgramIndices data.");
                 return;
             }
 
-            var interfaceRecords = new List<ProgramInterfaceData>();
+            var membranes = new GH_Structure<GH_Mesh>();
+            var infos = new GH_Structure<GH_String>();
 
-            foreach (List<IGH_Goo> branch in interfaceTree.Branches)
+            // Group voxels by program
+            var programVoxels = new Dictionary<int, List<(int, int, int)>>();
+            for (int i = 0; i < stack.ProgramIndices.Count; i++)
             {
-                foreach (IGH_Goo goo in branch)
-                {
-                    ProgramInterfaceData? record = UnwrapInterfaceData(goo);
+                int programId = stack.ProgramIndices[i];
+                var key = stack.VoxelGrid.FilledKeys[i];
 
-                    if (record == null)
-                    {
-                        AddRuntimeMessage(
-                            GH_RuntimeMessageLevel.Warning,
-                            "Ignored an ID item that is not ProgramInterfaceData.");
+                if (!programVoxels.ContainsKey(programId))
+                    programVoxels[programId] = new List<(int, int, int)>();
 
-                        continue;
-                    }
-
-                    interfaceRecords.Add(record);
-                }
+                programVoxels[programId].Add(key);
             }
 
-            if (interfaceRecords.Count == 0)
+            // Generate mesh for each program
+            foreach (var kvp in programVoxels.OrderBy(x => x.Key))
             {
-                AddRuntimeMessage(
-                    GH_RuntimeMessageLevel.Warning,
-                    "No ProgramInterfaceData records were found in ID.");
+                int programId = kvp.Key;
+                List<(int, int, int)> voxels = kvp.Value;
+                var path = new GH_Path(programId);
 
-                return;
+                Mesh mesh = GenerateProgramMesh(
+                    stack.VoxelGrid,
+                    voxels,
+                    includeBoundaryFaces,
+                    gapValue,
+                    smoothingIterations);
+
+                membranes.Append(new GH_Mesh(mesh), path);
+
+                string info = string.Format(
+                    "Program {0} | voxels={1} | vertices={2} | faces={3} | " +
+                    "smoothing={4} | gap={5:F4}",
+                    programId,
+                    voxels.Count,
+                    mesh.Vertices.Count,
+                    mesh.Faces.Count,
+                    smoothingIterations,
+                    gapValue);
+
+                infos.Append(new GH_String(info), path);
             }
 
-            var builders = new Dictionary<int, ProgramMeshBuilder>();
-
-            int skippedCaps = 0;
-            int skippedInvalidRecords = 0;
-            int programProgramFaceCount = 0;
-            int programCoreFaceCount = 0;
-            int capFaceCount = 0;
-
-            foreach (ProgramInterfaceData record in interfaceRecords)
-            {
-                if (record.IsHorizontalOpenBoundaryCap)
-                {
-                    if (!includeHorizontalCaps)
-                    {
-                        skippedCaps++;
-                        continue;
-                    }
-
-                    if (!IsRegularProgram(record.ProgramAIndex, stack.Programs))
-                    {
-                        skippedInvalidRecords++;
-                        continue;
-                    }
-
-                    AddFaceToProgram(
-                        builders,
-                        stack,
-                        record.ProgramAIndex,
-                        record,
-                        Vector3d.Zero);
-
-                    capFaceCount++;
-                    continue;
-                }
-
-                if (record.IsCoreInterface)
-                {
-                    int regularProgramIndex = FindRegularProgramSide(
-                        record,
-                        stack.Programs);
-
-                    if (regularProgramIndex < 0)
-                    {
-                        skippedInvalidRecords++;
-                        continue;
-                    }
-
-                    // Core has no visual membrane. The ordinary program receives
-                    // the exact canonical face with no gap offset.
-                    AddFaceToProgram(
-                        builders,
-                        stack,
-                        regularProgramIndex,
-                        record,
-                        Vector3d.Zero);
-
-                    programCoreFaceCount++;
-                    continue;
-                }
-
-                bool validProgramA = IsRegularProgram(
-                    record.ProgramAIndex,
-                    stack.Programs);
-
-                bool validProgramB = IsRegularProgram(
-                    record.ProgramBIndex,
-                    stack.Programs);
-
-                if (!validProgramA || !validProgramB ||
-                    record.ProgramAIndex == record.ProgramBIndex)
-                {
-                    skippedInvalidRecords++;
-                    continue;
-                }
-
-                Vector3d normal = record.Normal;
-
-                if (!normal.Unitize())
-                {
-                    skippedInvalidRecords++;
-                    continue;
-                }
-
-                double halfGap = separateProgramMeshes
-                    ? TotalProgramMeshGap * 3.0
-                    : 0.0;
-
-                // Canonical normal points Program A -> Program B.
-                // Each visual membrane moves toward its own program volume.
-                Vector3d programAOffset = -normal * halfGap;
-                Vector3d programBOffset = normal * halfGap;
-
-                AddFaceToProgram(
-                    builders,
-                    stack,
-                    record.ProgramAIndex,
-                    record,
-                    programAOffset);
-
-                AddFaceToProgram(
-                    builders,
-                    stack,
-                    record.ProgramBIndex,
-                    record,
-                    programBOffset);
-
-                programProgramFaceCount++;
-            }
-
-            var meshesTree = new GH_Structure<GH_Mesh>();
-            var programIndicesTree = new GH_Structure<GH_Integer>();
-            var programNamesTree = new GH_Structure<GH_String>();
-            var colorsTree = new GH_Structure<GH_Colour>();
-            var areasTree = new GH_Structure<GH_Number>();
-            var sourceInterfacesTree = new GH_Structure<GH_ObjectWrapper>();
-
-            int outputMeshCount = 0;
-
-            foreach (KeyValuePair<int, ProgramMeshBuilder> pair in builders
-                .OrderBy(item => item.Key))
-            {
-                int programIndex = pair.Key;
-                ProgramMeshBuilder builder = pair.Value;
-
-                if (builder.Mesh.Faces.Count == 0)
-                    continue;
-
-                builder.Mesh.Normals.ComputeNormals();
-                builder.Mesh.Compact();
-
-                var path = new GH_Path(programIndex);
-
-                meshesTree.Append(
-                    new GH_Mesh(builder.Mesh),
-                    path);
-
-                programIndicesTree.Append(
-                    new GH_Integer(programIndex),
-                    path);
-
-                programNamesTree.Append(
-                    new GH_String(stack.Programs[programIndex].Name),
-                    path);
-
-                colorsTree.Append(
-                    new GH_Colour(stack.Programs[programIndex].Color),
-                    path);
-
-                areasTree.Append(
-                    new GH_Number(builder.CanonicalArea),
-                    path);
-
-                foreach (ProgramInterfaceData record in builder.SourceRecords)
-                {
-                    sourceInterfacesTree.Append(
-                        new GH_ObjectWrapper(record),
-                        path);
-                }
-
-                Mesh previewMesh = builder.Mesh.DuplicateMesh();
-
-                if (previewMesh != null)
-                {
-                    _previewMeshes.Add(previewMesh);
-                    _previewColors.Add(stack.Programs[programIndex].Color);
-                }
-
-                outputMeshCount++;
-            }
-
-            if (outputMeshCount == 0)
-            {
-                AddRuntimeMessage(
-                    GH_RuntimeMessageLevel.Warning,
-                    "No membrane meshes were created from the supplied interface data.");
-            }
-
-            DA.SetDataTree(0, meshesTree);
-            DA.SetDataTree(1, programIndicesTree);
-            DA.SetDataTree(2, programNamesTree);
-            DA.SetDataTree(3, colorsTree);
-            DA.SetDataTree(4, areasTree);
-            DA.SetDataTree(5, sourceInterfacesTree);
-            DA.SetData(6, BuildReport(
-                interfaceRecords.Count,
-                outputMeshCount,
-                programProgramFaceCount,
-                programCoreFaceCount,
-                capFaceCount,
-                skippedCaps,
-                skippedInvalidRecords,
-                separateProgramMeshes,
-                includeHorizontalCaps));
+            DA.SetDataTree(0, membranes);
+            DA.SetDataTree(1, infos);
         }
 
         private static AnalysisStackData? UnwrapStack(object? value)
@@ -412,255 +189,257 @@ namespace Cumulus
             return value as AnalysisStackData;
         }
 
-        private static ProgramInterfaceData? UnwrapInterfaceData(IGH_Goo goo)
+        private Mesh GenerateProgramMesh(
+            VoxelGrid voxelGrid,
+            List<(int, int, int)> programVoxels,
+            bool includeBoundaryFaces,
+            double gapValue,
+            int smoothingIterations)
         {
-            if (goo is GH_ObjectWrapper wrapper)
-                return wrapper.Value as ProgramInterfaceData;
+            var mesh = new Mesh();
+            var voxelSet = new HashSet<(int, int, int)>(programVoxels);
 
-            return null;
-        }
-
-        private static bool IsRegularProgram(
-            int programIndex,
-            IReadOnlyList<ProgramDefinition> programs)
-        {
-            return programIndex >= 0 && programIndex < programs.Count;
-        }
-
-        private static int FindRegularProgramSide(
-            ProgramInterfaceData record,
-            IReadOnlyList<ProgramDefinition> programs)
-        {
-            if (IsRegularProgram(record.ProgramAIndex, programs))
-                return record.ProgramAIndex;
-
-            if (IsRegularProgram(record.ProgramBIndex, programs))
-                return record.ProgramBIndex;
-
-            return -1;
-        }
-
-        private static void AddFaceToProgram(
-            Dictionary<int, ProgramMeshBuilder> builders,
-            AnalysisStackData stack,
-            int programIndex,
-            ProgramInterfaceData record,
-            Vector3d offset)
-        {
-            if (!builders.TryGetValue(programIndex, out ProgramMeshBuilder? builder))
+            // Compute program centroid for inward normal orientation
+            Point3d centroid = Point3d.Origin;
+            foreach (var key in programVoxels)
             {
-                builder = new ProgramMeshBuilder();
-                builders.Add(programIndex, builder);
+                centroid += voxelGrid.KeyToCenter(key);
+            }
+            centroid /= programVoxels.Count;
+
+            // Generate faces for each voxel
+            foreach (var voxelKey in programVoxels)
+            {
+                GenerateVoxelFaces(
+                    mesh,
+                    voxelGrid,
+                    voxelKey,
+                    voxelSet,
+                    includeBoundaryFaces,
+                    centroid,
+                    gapValue);
             }
 
-            Point3d[] corners = GetFaceCorners(
-                stack.VoxelGrid,
-                record,
-                offset);
+            mesh.Normals.ComputeNormals();
+            mesh.Compact();
 
-            int start = builder.Mesh.Vertices.Count;
+            // Apply smoothing if requested
+            if (smoothingIterations > 0)
+            {
+                ApplyLaplacianSmoothing(mesh, smoothingIterations);
+            }
 
-            builder.Mesh.Vertices.Add(corners[0]);
-            builder.Mesh.Vertices.Add(corners[1]);
-            builder.Mesh.Vertices.Add(corners[2]);
-            builder.Mesh.Vertices.Add(corners[3]);
-            builder.Mesh.Faces.AddFace(
-                start,
-                start + 1,
-                start + 2,
-                start + 3);
+            mesh.Normals.ComputeNormals();
+            mesh.Compact();
 
-            builder.CanonicalArea += record.Area;
-            builder.SourceRecords.Add(record);
+            return mesh;
         }
 
-        private static Point3d[] GetFaceCorners(
-            VoxelGrid grid,
-            ProgramInterfaceData record,
-            Vector3d offset)
+        private void GenerateVoxelFaces(
+            Mesh mesh,
+            VoxelGrid voxelGrid,
+            (int, int, int) voxelKey,
+            HashSet<(int, int, int)> voxelSet,
+            bool includeBoundaryFaces,
+            Point3d centroid,
+            double gapValue)
         {
-            Vector3d tangentU;
-            Vector3d tangentV;
+            int x = voxelKey.Item1;
+            int y = voxelKey.Item2;
+            int z = voxelKey.Item3;
 
-            switch (record.GridAxis)
+            // Check all 6 face directions
+            var directions = new[]
             {
-                case 0:
-                    tangentU = GridLocalVectorToWorld(grid, Vector3d.YAxis);
-                    tangentV = GridLocalVectorToWorld(grid, Vector3d.ZAxis);
-                    break;
-
-                case 1:
-                    tangentU = GridLocalVectorToWorld(grid, Vector3d.ZAxis);
-                    tangentV = GridLocalVectorToWorld(grid, Vector3d.XAxis);
-                    break;
-
-                default:
-                    tangentU = GridLocalVectorToWorld(grid, Vector3d.XAxis);
-                    tangentV = GridLocalVectorToWorld(grid, Vector3d.YAxis);
-                    break;
-            }
-
-            tangentU.Unitize();
-            tangentV.Unitize();
-
-            Vector3d normal = record.Normal;
-
-            if (!normal.Unitize())
-                normal = Vector3d.CrossProduct(tangentU, tangentV);
-
-            if (Vector3d.Multiply(
-                    Vector3d.CrossProduct(tangentU, tangentV),
-                    normal) < 0.0)
-            {
-                tangentV = -tangentV;
-            }
-
-            double halfVoxel = grid.VoxelSize * 0.5;
-            Point3d center = record.Center + offset;
-
-            return new[]
-            {
-                center - tangentU * halfVoxel - tangentV * halfVoxel,
-                center + tangentU * halfVoxel - tangentV * halfVoxel,
-                center + tangentU * halfVoxel + tangentV * halfVoxel,
-                center - tangentU * halfVoxel + tangentV * halfVoxel
+                (1, 0, 0), (-1, 0, 0),  // X axis
+                (0, 1, 0), (0, -1, 0),  // Y axis
+                (0, 0, 1), (0, 0, -1)   // Z axis
             };
-        }
 
-        private static Vector3d GridLocalVectorToWorld(
-            VoxelGrid grid,
-            Vector3d localVector)
-        {
-            Vector3d worldVector = localVector;
-            worldVector.Transform(grid.PlaneToWorld);
-            return worldVector;
-        }
-
-        private static string BuildReport(
-            int sourceRecordCount,
-            int outputMeshCount,
-            int programProgramFaceCount,
-            int programCoreFaceCount,
-            int capFaceCount,
-            int skippedCaps,
-            int skippedInvalidRecords,
-            bool separateProgramMeshes,
-            bool includeHorizontalCaps)
-        {
-            string gapDescription = separateProgramMeshes
-                ? "program-program gap=0.1 model units"
-                : "program-program gap=off";
-
-            return string.Format(
-                "Program Membranes | source_interfaces={0} | " +
-                "program_meshes={1} | program-program_faces={2} | " +
-                "program-core_faces={3} | horizontal_caps={4}\n" +
-                "{5} | include_horizontal_caps={6} | " +
-                "skipped_caps={7} | skipped_invalid={8}\n" +
-                "No smoothing is applied. Program-to-core interfaces and " +
-                "horizontal caps remain unoffset.",
-                sourceRecordCount,
-                outputMeshCount,
-                programProgramFaceCount,
-                programCoreFaceCount,
-                capFaceCount,
-                gapDescription,
-                includeHorizontalCaps,
-                skippedCaps,
-                skippedInvalidRecords);
-        }
-
-        private void ClearPreviewGeometry()
-        {
-            foreach (Mesh mesh in _previewMeshes)
-                mesh.Dispose();
-
-            _previewMeshes.Clear();
-            _previewColors.Clear();
-        }
-
-        public override bool IsPreviewCapable => true;
-
-        public override BoundingBox ClippingBox
-        {
-            get
+            foreach (var (dx, dy, dz) in directions)
             {
-                var boundingBox = BoundingBox.Empty;
+                var neighborKey = (x + dx, y + dy, z + dz);
+                bool hasNeighbor = voxelSet.Contains(neighborKey);
+                bool isGridNeighbor = voxelGrid.FilledKeys.Contains(neighborKey);
 
-                foreach (Mesh mesh in _previewMeshes)
+                // Generate face if:
+                // - No neighbor in this program (boundary face), AND
+                // - Either includeBoundaryFaces is true, OR there's a grid neighbor
+                if (!hasNeighbor && (includeBoundaryFaces || isGridNeighbor))
                 {
-                    if (mesh != null && mesh.IsValid)
-                        boundingBox.Union(mesh.GetBoundingBox(true));
+                    AddVoxelFace(
+                        mesh,
+                        voxelGrid,
+                        voxelKey,
+                        dx, dy, dz,
+                        centroid,
+                        gapValue);
+                }
+            }
+        }
+
+        private void AddVoxelFace(
+            Mesh mesh,
+            VoxelGrid voxelGrid,
+            (int, int, int) voxelKey,
+            int dx, int dy, int dz,
+            Point3d centroid,
+            double gapValue)
+        {
+            int x = voxelKey.Item1;
+            int y = voxelKey.Item2;
+            int z = voxelKey.Item3;
+
+            // Get the 4 corners of this voxel face
+            Point3d[] corners = GetVoxelFaceCorners(voxelGrid, x, y, z, dx, dy, dz);
+
+            if (corners == null || corners.Length != 4)
+                return;
+
+            // Compute face center and outward normal
+            Point3d faceCenter = new Point3d(
+                (corners[0].X + corners[1].X + corners[2].X + corners[3].X) / 4.0,
+                (corners[0].Y + corners[1].Y + corners[2].Y + corners[3].Y) / 4.0,
+                (corners[0].Z + corners[1].Z + corners[2].Z + corners[3].Z) / 4.0);
+
+            Vector3d outwardNormal = new Vector3d(dx, dy, dz);
+            outwardNormal.Transform(voxelGrid.PlaneToWorld);
+            outwardNormal.Unitize();
+
+            // Invert normal to face inward (toward centroid)
+            Vector3d towardCentroid = centroid - faceCenter;
+            if (outwardNormal * towardCentroid < 0)
+            {
+                outwardNormal = -outwardNormal;
+            }
+
+            // Apply inward offset
+            Vector3d offsetVector = -outwardNormal * gapValue;
+
+            int start = mesh.Vertices.Count;
+            foreach (var corner in corners)
+            {
+                mesh.Vertices.Add(corner + offsetVector);
+            }
+
+            // Add face with correct winding for inward normal
+            mesh.Faces.AddFace(start, start + 3, start + 2, start + 1);
+        }
+
+        private Point3d[] GetVoxelFaceCorners(
+            VoxelGrid voxelGrid,
+            int x, int y, int z,
+            int dx, int dy, int dz)
+        {
+            double vs = voxelGrid.VoxelSize;
+            Point3d origin = voxelGrid.Origin;
+
+            Point3d[] localCorners = null;
+
+            if (dx != 0)
+            {
+                // Face perpendicular to X axis
+                int planeX = x + (dx > 0 ? 1 : 0);
+                localCorners = new[]
+                {
+                    new Point3d(planeX * vs, y * vs, z * vs),
+                    new Point3d(planeX * vs, (y + 1) * vs, z * vs),
+                    new Point3d(planeX * vs, (y + 1) * vs, (z + 1) * vs),
+                    new Point3d(planeX * vs, y * vs, (z + 1) * vs)
+                };
+            }
+            else if (dy != 0)
+            {
+                // Face perpendicular to Y axis
+                int planeY = y + (dy > 0 ? 1 : 0);
+                localCorners = new[]
+                {
+                    new Point3d(x * vs, planeY * vs, z * vs),
+                    new Point3d(x * vs, planeY * vs, (z + 1) * vs),
+                    new Point3d((x + 1) * vs, planeY * vs, (z + 1) * vs),
+                    new Point3d((x + 1) * vs, planeY * vs, z * vs)
+                };
+            }
+            else if (dz != 0)
+            {
+                // Face perpendicular to Z axis
+                int planeZ = z + (dz > 0 ? 1 : 0);
+                localCorners = new[]
+                {
+                    new Point3d(x * vs, y * vs, planeZ * vs),
+                    new Point3d((x + 1) * vs, y * vs, planeZ * vs),
+                    new Point3d((x + 1) * vs, (y + 1) * vs, planeZ * vs),
+                    new Point3d(x * vs, (y + 1) * vs, planeZ * vs)
+                };
+            }
+
+            if (localCorners == null)
+                return null;
+
+            // Transform to world space
+            Point3d[] worldCorners = new Point3d[4];
+            for (int i = 0; i < 4; i++)
+            {
+                Point3d local = localCorners[i];
+                local.X = origin.X + local.X;
+                local.Y = origin.Y + local.Y;
+                local.Z = origin.Z + local.Z;
+                local.Transform(voxelGrid.PlaneToWorld);
+                worldCorners[i] = local;
+            }
+
+            return worldCorners;
+        }
+
+        private void ApplyLaplacianSmoothing(Mesh mesh, int iterations)
+        {
+            for (int iter = 0; iter < iterations; iter++)
+            {
+                var newPositions = new Point3d[mesh.Vertices.Count];
+                Array.Copy(mesh.Vertices.ToPoint3dArray(), newPositions, mesh.Vertices.Count);
+
+                // Build vertex adjacency
+                var adjacency = new List<int>[mesh.Vertices.Count];
+                for (int i = 0; i < adjacency.Length; i++)
+                    adjacency[i] = new List<int>();
+
+                foreach (var face in mesh.Faces)
+                {
+                    int[] indices = new[] { face.A, face.B, face.C };
+                    if (face.IsQuad)
+                        indices = new[] { face.A, face.B, face.C, face.D };
+
+                    for (int i = 0; i < indices.Length; i++)
+                    {
+                        int curr = indices[i];
+                        int next = indices[(i + 1) % indices.Length];
+                        if (!adjacency[curr].Contains(next))
+                            adjacency[curr].Add(next);
+                    }
                 }
 
-                return boundingBox;
+                // Smooth interior vertices
+                for (int i = 0; i < mesh.Vertices.Count; i++)
+                {
+                    if (adjacency[i].Count == 0)
+                        continue;
+
+                    Point3d avg = Point3d.Origin;
+                    foreach (int neighbor in adjacency[i])
+                    {
+                        avg += mesh.Vertices[neighbor];
+                    }
+                    avg /= adjacency[i].Count;
+
+                    newPositions[i] = avg;
+                }
+
+                // Update mesh vertices
+                for (int i = 0; i < mesh.Vertices.Count; i++)
+                {
+                    mesh.Vertices.SetVertex(i, newPositions[i]);
+                }
             }
-        }
-
-        public override void DrawViewportMeshes(IGH_PreviewArgs args)
-        {
-            if (Hidden || !IsPreviewCapable)
-                return;
-
-            for (int index = 0;
-                 index < _previewMeshes.Count &&
-                 index < _previewColors.Count;
-                 index++)
-            {
-                Mesh mesh = _previewMeshes[index];
-
-                if (mesh == null || !mesh.IsValid)
-                    continue;
-
-                args.Display.DrawMeshShaded(
-                    mesh,
-                    new Rhino.Display.DisplayMaterial(
-                        _previewColors[index]));
-            }
-        }
-
-        public override void DrawViewportWires(IGH_PreviewArgs args)
-        {
-            if (Hidden || !IsPreviewCapable)
-                return;
-
-            for (int index = 0;
-                 index < _previewMeshes.Count &&
-                 index < _previewColors.Count;
-                 index++)
-            {
-                Mesh mesh = _previewMeshes[index];
-
-                if (mesh == null || !mesh.IsValid)
-                    continue;
-
-                Color color = _previewColors[index];
-
-                Color wireColor = Color.FromArgb(
-                    255,
-                    Math.Max(0, color.R - 50),
-                    Math.Max(0, color.G - 50),
-                    Math.Max(0, color.B - 50));
-
-                args.Display.DrawMeshWires(mesh, wireColor);
-            }
-        }
-
-        public override void RemovedFromDocument(
-            GH_Document document)
-        {
-            ClearPreviewGeometry();
-            base.RemovedFromDocument(document);
-        }
-
-        private sealed class ProgramMeshBuilder
-        {
-            public Mesh Mesh { get; } = new Mesh();
-
-            public double CanonicalArea { get; set; }
-
-            public List<ProgramInterfaceData> SourceRecords { get; } =
-                new List<ProgramInterfaceData>();
         }
     }
 }
