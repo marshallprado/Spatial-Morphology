@@ -39,7 +39,18 @@ namespace Cumulus
         public override Guid ComponentGuid =>
             new Guid("3D2CFB64-52C5-4B36-9A9B-84B92E384F4A");
 
-        protected override Bitmap Icon => null;
+        protected override Bitmap Icon
+        {
+            get
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+
+                using var stream = assembly.GetManifestResourceStream(
+                    "Cumulus.Resources.FloorPlates_24.png");
+
+                return stream != null ? new Bitmap(stream) : null!;
+            }
+        }
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {

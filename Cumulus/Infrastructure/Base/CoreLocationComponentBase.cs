@@ -4,12 +4,13 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using Cumulus;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Infrastructure.Base
 {
     /// <summary>
     /// Shared implementation for the focused manual and generative core components.

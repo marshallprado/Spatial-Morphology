@@ -3,10 +3,11 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using Cumulus.Infrastructure.Base;
 using Grasshopper.Kernel;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Components.Legacy
 {
     /// <summary>
     /// Which way each voxel faces, derived from which of its six face

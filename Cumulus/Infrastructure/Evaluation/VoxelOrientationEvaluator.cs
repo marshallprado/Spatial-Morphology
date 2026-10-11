@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using Rhino.Geometry;
 
-namespace Cumulus.Components.Evaluation
+namespace Cumulus.Infrastructure.Evaluation
 {
     /// <summary>
     /// Shared face-neighbour orientation evaluation used by Surface Direction

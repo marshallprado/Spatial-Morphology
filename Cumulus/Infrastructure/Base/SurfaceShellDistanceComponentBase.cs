@@ -8,7 +8,7 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using Rhino.Geometry;
 
-namespace Cumulus.Components.Base
+namespace Cumulus.Infrastructure.Base
 {
     /// <summary>
     /// Shared implementation for focused surface-shell distance analysis components.

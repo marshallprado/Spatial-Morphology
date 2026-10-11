@@ -6,7 +6,7 @@ using System.Drawing;
 using Grasshopper.Kernel;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Infrastructure.Base
 {
     /// <summary>
     /// Shared base class for all SA components.

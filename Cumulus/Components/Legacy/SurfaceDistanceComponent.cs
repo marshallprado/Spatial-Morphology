@@ -3,10 +3,11 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using Cumulus.Infrastructure.Base;
 using Grasshopper.Kernel;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Components.Legacy
 {
     /// <summary>
     /// Distance from the surface shell, in hops (topological) or model units

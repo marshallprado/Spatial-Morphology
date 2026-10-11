@@ -6,7 +6,7 @@ using Grasshopper.Kernel;
 using Rhino.Geometry;
 using Rhino.Geometry.Intersect;
 
-namespace Cumulus
+namespace Cumulus.Infrastructure.Base
 {
     /// <summary>
     /// Shared implementation for focused voxel-view analysis components.

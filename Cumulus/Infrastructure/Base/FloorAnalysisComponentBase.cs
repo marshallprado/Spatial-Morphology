@@ -5,7 +5,7 @@ using System.Drawing;
 using Grasshopper.Kernel;
 using Rhino.Geometry;
 
-namespace Cumulus
+namespace Cumulus.Infrastructure.Base
 {
     /// <summary>
     /// Shared implementation for focused floor-based analysis components.

@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Cumulus
+namespace Cumulus.Infrastructure.Base
 {
     /// <summary>Integer voxel coordinate used by the floor-plate extractor.</summary>
     public struct FloorPlateVoxelKey : IEquatable<FloorPlateVoxelKey>
